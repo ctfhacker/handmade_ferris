@@ -59,6 +59,7 @@ impl std::default::Default for XEvent {
 pub enum Event {
     KeyPress,
     Expose,
+    Unknown(i32)
 }
 
 impl From<i32> for Event {
@@ -66,7 +67,7 @@ impl From<i32> for Event {
         match val {
             2 => Event::KeyPress,
            12 => Event::Expose,
-           _  => panic!("Unknown event: {}", val)
+           _  => Event::Unknown(val)
         }
     }
 }

@@ -15,7 +15,6 @@ check:
 				   --allow clippy::redundant_field_names \
 				   --allow clippy::must_use_candidate
 
-
 docs: check
 	# Documentation build regardless of arch
 	cargo doc 

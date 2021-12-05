@@ -100,17 +100,19 @@ const TMP_FILE: &str = "/tmp/.libgame.so";
 
 /// Load and return the function pointers from the game code
 pub fn get_game_funcs() -> GameFuncs {
-    // Copy the current game library into a temp file for hot reload
-    std::fs::copy("./target/release/libgame.so", TMP_FILE)
-        .expect("Failed to copy libgame.so");
+    // Copy the current game library into a temp file for hot reload. Ignore the failure
+    // copy case and pick up the game logic on the next frame
+    let _discard = std::fs::copy("./target/release/libgame.so", TMP_FILE);
 
-    let library    = CString::new(TMP_FILE).expect("CString failed for /tmp/libgame.so");
+    // Get the temporary library file
+    let library = CString::new(TMP_FILE).expect("CString failed for tmp library");
 
     unsafe {
         // Open the  current game dynamic library
         let handle = dlopen(library.as_ptr(), RTLD_LAZY);
         assert!(handle.0 != 0, "libgame.so not found");
 
+        // Get the `game_update_and_render` export
         let game_update_and_render = get_symbol(handle, "game_update_and_render")
             .unwrap();
 

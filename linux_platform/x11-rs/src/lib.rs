@@ -37,6 +37,9 @@ extern "system" {
         src_x: i32, src_y: i32, dest_x: i32, dest_y: i32, width: u32, height: u32) 
         -> i32;
     fn XSync(display: *mut Display, discard: bool);
+    fn XCheckWindowEvent(display: *mut Display, window: Window, mask: i64, 
+        found_event: *mut XEvent) -> bool;
+    fn XFlush(display: *mut Display) -> u32;
 }
 
 #[repr(C)]
@@ -54,7 +57,40 @@ impl std::default::Default for XEvent {
     }
 }
 
+/// Input event masks. Used as event mask window attributes and as arguments to grab
+/// requests.
+#[repr(i64)]
+#[derive(Copy, Clone, Debug)]
+pub enum EventMask {
+    // NoEvent = 1 << 0,
+    KeyPress = 1 << 0,
+    KeyRelease = 1 << 1,
+    ButtonPress = 1 << 2,
+    ButtonRelease = 1 << 3,
+    EnterWindow = 1 << 4,
+    LeaveWindow = 1 << 5,
+    PointerMotion = 1 << 6,
+    PointerMotionHint = 1 << 7,
+    Button1Motion = 1 << 8,
+    Button2Motion = 1 << 9,
+    Button3Motion = 1 << 10,
+    Button4Motion = 1 << 11,
+    Button5Motion = 1 << 12,
+    ButtonMotion = 1 << 13,
+    KeymapState = 1 << 14,
+    Exposure = 1 << 15,
+    VisibilityChange = 1 << 16,
+    StructureNotify = 1 << 17,
+    ResizeRedirect = 1 << 18,
+    SubstructureNotify = 1 << 19, 
+    SubstructureRedirect = 1 << 20,
+    FocusChange = 1 << 21,
+    PropertyChange = 1 << 22,
+    ColormapChange = 1 << 23,
+    OwnerGrabButto = 1 << 24
+}
 
+/// Event names. Used in "type" field in `XEvent` structures.
 #[derive(Copy, Clone, Debug)]
 pub enum Event {
     KeyPress,
@@ -72,9 +108,18 @@ impl From<i32> for Event {
     }
 }
 
+impl From<Event> for i32 {
+    fn from(event: Event) -> i32 {
+        match event {
+            Event::KeyPress     => 2,
+            Event::Expose       => 12,
+            Event::Unknown(val) => val,
+        }
+    }
+}
 
-const EXPOSURE_MASK:  i64 = 1 << 15;
-const KEY_PRESS_MASK: i64 = 1 << 0;
+// const EXPOSURE_MASK:  i64 = 1 << 15;
+// const KEY_PRESS_MASK: i64 = 1 << 0;
 
 /// Opaque display pointer returned from X11
 #[repr(transparent)]
@@ -129,10 +174,31 @@ impl SimpleWindow {
     /// Get the next event from the window
     pub fn next_event(&self) -> Event {
         let mut event = XEvent::default();
+
         unsafe { 
             XNextEvent(*self.display, &mut event); 
         }
+
         event.type_.into()
+    }
+
+    /// Check if any needed event is available and return it. If not, flush the display.
+    pub fn check_event(&self) -> Option<Event> {
+        let mut event = XEvent::default();
+
+        let mask = EventMask::KeyPress as i64 | EventMask::Exposure as i64;
+
+        let found = unsafe { 
+            XCheckWindowEvent(*self.display, self.window, mask, &mut event)
+        };
+
+        // Return the event if found, otherwise return None and flush the display
+        if found {
+            Some(event.type_.into())
+        } else {
+            unsafe { XFlush(*self.display); } 
+            None
+        }
     }
 
     /// Get a reference to the display of the window
@@ -295,7 +361,8 @@ impl SimpleWindowBuilder {
                 0
             );
 
-            XSelectInput(*display, window, EXPOSURE_MASK | KEY_PRESS_MASK);
+            let mask = EventMask::Exposure as i64 | EventMask::KeyPress as i64;
+            XSelectInput(*display, window, mask);
 
             XMapWindow(*display, window);
 

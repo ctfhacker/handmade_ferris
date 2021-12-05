@@ -10,10 +10,15 @@ use game_state::Game;
 /// * On 16 bit machines
 #[no_mangle]
 pub extern fn game_update_and_render(game: &mut Game) {
+    test_gradient(game);
+}
+
+/// Debug function to print a set of gradient squares to the display
+fn test_gradient(game: &mut Game) {
     for col in 0..game.width {
         for row in 0..game.height {
             let index = col * game.width + row;
-            let color = col % 256 << 16 | row % 256;
+            let color = col % 256 << 8 | row % 256;
             game.framebuffer[usize::try_from(index).unwrap()] = color as u32;
         }
     }

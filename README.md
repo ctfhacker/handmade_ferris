@@ -22,3 +22,7 @@ day given.
 ### Day 027
 
 ![Day027](./progress_pics/day027.png)
+
+### Day 028
+
+![Day028](./progress_pics/day028.png)

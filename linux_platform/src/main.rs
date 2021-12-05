@@ -14,10 +14,10 @@ const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
 const MILLISECONDS_PER_FRAME: u128 = (1.0 / TARGET_FRAMES_PER_SECOND * 1000.) as u128;
 
 /// Width of the game window
-const GAME_WINDOW_WIDTH:  u32 = 800;
+const GAME_WINDOW_WIDTH:  u32 = 960;
 
 /// Height of the game window
-const GAME_WINDOW_HEIGHT: u32 = 800;
+const GAME_WINDOW_HEIGHT: u32 = 540;
 
 fn main() {
     let mut window = x11_rs::SimpleWindow::build()
@@ -85,10 +85,15 @@ fn main() {
             framebuffer: &mut window.framebuffer,
             width: GAME_WINDOW_WIDTH,
             height: GAME_WINDOW_HEIGHT,
+            error: Ok(())
         };
 
         // Call the event code
         game_update_and_render(&mut game_state);
+
+        if let Err(e) = game_state.error {
+            println!("ERR: {:?}", e);
+        }
 
         // Place the updated framebuffer into the X11 window
         window.put_image();

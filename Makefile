@@ -1,7 +1,9 @@
-all: check docs
+all: check build docs
+
+build: check
 
 check:
-	cargo build --release
+	cargo build --release || true
 
 	# Clippy checks
 	RUST_BACKTRACE=full cargo clippy --color always -- \
@@ -13,7 +15,8 @@ check:
 				   --deny  clippy::pedantic \
 				   --allow clippy::struct_excessive_bools \
 				   --allow clippy::redundant_field_names \
-				   --allow clippy::must_use_candidate
+				   --allow clippy::must_use_candidate || true
+
 
 docs: check
 	# Documentation build regardless of arch

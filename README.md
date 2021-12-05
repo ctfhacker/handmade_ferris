@@ -8,3 +8,9 @@ Currently builds on linux using X11.
 
 The repo is tagged roughly with the code in the state of the project at the end of the
 day given.
+
+## Progress Pics
+
+### Day 027
+
+![Day027](./progress_pics/day027.png)

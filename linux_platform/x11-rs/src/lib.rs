@@ -40,6 +40,19 @@ extern "system" {
     fn XCheckWindowEvent(display: *mut Display, window: Window, mask: i64, 
         found_event: *mut XEvent) -> bool;
     fn XFlush(display: *mut Display) -> u32;
+
+    fn XkbSetAutoRepeatRate(
+        // connection to X server
+        display: *mut Display, 
+
+        // device to configure, or XkbUseCoreKbd (aka 0x100)
+        device_spec: u32, 
+
+        // initial delay, ms
+        timeout: u32, 
+
+        // delay between repeats
+        interval: u32) -> bool;
 }
 
 #[repr(C)]
@@ -90,10 +103,15 @@ pub enum EventMask {
     OwnerGrabButto = 1 << 24
 }
 
+const EVENT_MASK: i64 = EventMask::Exposure as i64 
+    | EventMask::KeyPress as i64
+    | EventMask::KeyRelease as i64;
+
 /// Event names. Used in "type" field in `XEvent` structures.
 #[derive(Copy, Clone, Debug)]
 pub enum Event {
-    KeyPress,
+    KeyPress(char),
+    KeyRelease(char),
     Expose,
     Unknown(i32)
 }
@@ -101,7 +119,8 @@ pub enum Event {
 impl From<i32> for Event {
     fn from(val: i32) -> Event {
         match val {
-            2 => Event::KeyPress,
+            2 => Event::KeyPress('?'),
+            3 => Event::KeyRelease('?'),
            12 => Event::Expose,
            _  => Event::Unknown(val)
         }
@@ -111,15 +130,13 @@ impl From<i32> for Event {
 impl From<Event> for i32 {
     fn from(event: Event) -> i32 {
         match event {
-            Event::KeyPress     => 2,
-            Event::Expose       => 12,
-            Event::Unknown(val) => val,
+            Event::KeyPress(_)   => 2,
+            Event::KeyRelease(_) => 3,
+            Event::Expose        => 12,
+            Event::Unknown(val)  => val,
         }
     }
 }
-
-// const EXPOSURE_MASK:  i64 = 1 << 15;
-// const KEY_PRESS_MASK: i64 = 1 << 0;
 
 /// Opaque display pointer returned from X11
 #[repr(transparent)]
@@ -144,6 +161,26 @@ fn open_display() -> Option<DisplayPtr> {
             Some(display)
         }
     }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct KeyEvent {
+    type_: u32,
+    serial: u64,
+    send_event: i32,
+    display: usize,
+    window: Window,
+    root: Window,
+    subwindow: Window,
+    time: u32,
+    x: i32,
+    y: i32,
+    x_root: i32,
+    y_root: i32,
+    state: u32,
+    keycode: u32,
+    same_screen: i32
 }
 
 const ZPIXMAP: i32 = 2;
@@ -186,15 +223,58 @@ impl SimpleWindow {
     pub fn check_event(&self) -> Option<Event> {
         let mut event = XEvent::default();
 
-        let mask = EventMask::KeyPress as i64 | EventMask::Exposure as i64;
-
         let found = unsafe { 
-            XCheckWindowEvent(*self.display, self.window, mask, &mut event)
+            XCheckWindowEvent(*self.display, self.window, EVENT_MASK, &mut event)
         };
 
         // Return the event if found, otherwise return None and flush the display
         if found {
-            Some(event.type_.into())
+            let res = event.type_.into();
+            if matches!(res, Event::KeyPress(_) | Event::KeyRelease(_)) {
+                let key: &KeyEvent = unsafe {
+                    &*(event.pad.as_ptr() as *const KeyEvent)
+                };
+
+                let chr = match key.keycode {
+                    0x18 => 'q',
+                    0x19 => 'w',
+                    0x1a => 'e',
+                    0x1b => 'r',
+                    0x1c => 't',
+                    0x1d => 'y',
+                    0x1e => 'u',
+                    0x1f => 'i',
+                    0x20 => 'o',
+                    0x21 => 'p',
+                    0x26 => 'a',
+                    0x27 => 's',
+                    0x28 => 'd',
+                    0x29 => 'f',
+                    0x2a => 'g',
+                    0x2b => 'h',
+                    0x2c => 'j',
+                    0x2d => 'k',
+                    0x2e => 'l',
+                    0x34 => 'z',
+                    0x35 => 'x',
+                    0x36 => 'c',
+                    0x37 => 'v',
+                    0x38 => 'b',
+                    0x39 => 'n',
+                    0x3a => 'm',
+                    _ => '?'
+                };
+
+                let res = match res {
+                    Event::KeyPress(_)   => Event::KeyPress(chr),
+                    Event::KeyRelease(_) => Event::KeyRelease(chr),
+                    _ => unreachable!()
+                };
+
+                return Some(res);
+            }
+            
+            Some(res)
         } else {
             unsafe { XFlush(*self.display); } 
             None
@@ -361,10 +441,11 @@ impl SimpleWindowBuilder {
                 0
             );
 
-            let mask = EventMask::Exposure as i64 | EventMask::KeyPress as i64;
-            XSelectInput(*display, window, mask);
+            XSelectInput(*display, window, EVENT_MASK);
 
             XMapWindow(*display, window);
+
+            // XkbSetAutoRepeatRate(*display, 0x100, 1iiiiiiiiiiiiiiiiiiiiii, 1);
 
             let num_bytes   = usize::try_from(width * height).unwrap();
             let framebuffer = vec![0; num_bytes];

@@ -4,7 +4,7 @@ use std::ffi::{CString, CStr};
 use std::os::raw::{c_char, c_void};
 use std::marker::PhantomData;
 
-use game_state::Game;
+use game_state::{Game, State};
 
 #[link(name="dl")]
 extern "C" {
@@ -29,7 +29,7 @@ pub struct GameFuncs {
     pub handle: Handle,
 
     /// Dummy test function
-    pub game_update_and_render: Symbol<extern fn(&Game)>,
+    pub game_update_and_render: Symbol<extern fn(&Game, &mut State)>,
 }
 
 impl GameFuncs {

@@ -1,8 +1,10 @@
 //! Linux platform for Handmade Ferris
 #![feature(asm)]
 
+use std::collections::HashSet;
+
 mod dl;
-use game_state::Game;
+use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game};
 
 /// Target FPS for the game
 const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
@@ -13,18 +15,12 @@ const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 const MILLISECONDS_PER_FRAME: u128 = (1.0 / TARGET_FRAMES_PER_SECOND * 1000.) as u128;
 
-/// Width of the game window
-const GAME_WINDOW_WIDTH:  u32 = 960;
-
-/// Height of the game window
-const GAME_WINDOW_HEIGHT: u32 = 540;
-
 fn main() {
     let mut window = x11_rs::SimpleWindow::build()
         .x(0)
         .y(0)
-        .width(GAME_WINDOW_WIDTH)
-        .height(GAME_WINDOW_HEIGHT)
+        .width(u32::from(GAME_WINDOW_WIDTH))
+        .height(u32::from(GAME_WINDOW_HEIGHT))
         .border_width(1)
         .border(0)
         .background(1)
@@ -51,6 +47,13 @@ fn main() {
 
     let time_begin = std::time::Instant::now();
 
+    let mut state = game_state::State {
+        player_x: 200.,
+        player_y: 200.,
+    };
+
+    let mut buttons_pressed = HashSet::new();
+
     // Main event loop
     for frame in 0.. {
         // Begin the timer for this loop iteration
@@ -66,12 +69,16 @@ fn main() {
         match event {
             Some(x11_rs::Event::Expose) => {
             }
-            Some(x11_rs::Event::KeyPress) => {
+            Some(x11_rs::Event::KeyPress(key)) => {
+                buttons_pressed.insert(key);
+            }
+            Some(x11_rs::Event::KeyRelease(key)) => {
+                buttons_pressed.remove(&key);
             }
             Some(x11_rs::Event::Unknown(val)) => {
                 println!("Unknown event: {}", val);
             }
-            _ => { }
+            None => { }
         }
 
         // Debug print the frames per second
@@ -81,17 +88,18 @@ fn main() {
         }
 
         // Prepare the game state for the game logic
-        let mut game_state = Game {
+        let mut game = Game {
             framebuffer: &mut window.framebuffer,
             width: GAME_WINDOW_WIDTH,
             height: GAME_WINDOW_HEIGHT,
-            error: Ok(())
+            error: Ok(()),
+            buttons_pressed: &buttons_pressed,
         };
 
         // Call the event code
-        game_update_and_render(&mut game_state);
+        game_update_and_render(&mut game, &mut state);
 
-        if let Err(e) = game_state.error {
+        if let Err(e) = game.error {
             println!("ERR: {:?}", e);
         }
 

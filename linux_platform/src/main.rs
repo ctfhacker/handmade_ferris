@@ -1,10 +1,8 @@
 //! Linux platform for Handmade Ferris
 #![feature(asm)]
 
-use std::collections::HashSet;
-
 mod dl;
-use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game};
+use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game, Button};
 
 /// Target FPS for the game
 const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
@@ -29,16 +27,6 @@ fn main() {
 
     window.create_image();
 
-    /*
-    for col in 0..800 {
-        for row in 0..800 {
-            let index = col * 800 + row;
-            let color = (col % 256) << 8 | (row % 256);
-            window.framebuffer[index] = u32::try_from(color).unwrap();
-        }
-    }
-    */
-
     window.put_image();
 
     // Load the game logic library
@@ -47,12 +35,10 @@ fn main() {
 
     let time_begin = std::time::Instant::now();
 
-    let mut state = game_state::State {
-        player_x: 200.,
-        player_y: 200.,
-    };
+    // Get the reset game state
+    let mut state = game_state::State::reset();
 
-    let mut buttons_pressed = HashSet::new();
+    let mut buttons = [false; Button::Count as usize];
 
     // Main event loop
     for frame in 0.. {
@@ -67,18 +53,37 @@ fn main() {
 
         // Event handler loop
         match event {
-            Some(x11_rs::Event::Expose) => {
-            }
             Some(x11_rs::Event::KeyPress(key)) => {
-                buttons_pressed.insert(key);
+                let button = match key {
+                    'w' => Some(Button::Up),
+                    'a' => Some(Button::Left),
+                    's' => Some(Button::Down),
+                    'd' => Some(Button::Right),
+                      _ => None
+                };
+    
+                if let Some(button) = button {
+                    buttons[button as usize] = true;
+                }
             }
             Some(x11_rs::Event::KeyRelease(key)) => {
-                buttons_pressed.remove(&key);
+                let button = match key {
+                    'w' => Some(Button::Up),
+                    'a' => Some(Button::Left),
+                    's' => Some(Button::Down),
+                    'd' => Some(Button::Right),
+                      _ => None
+                };
+    
+                if let Some(button) = button {
+                    buttons[button as usize] = false;
+                }
             }
             Some(x11_rs::Event::Unknown(val)) => {
                 println!("Unknown event: {}", val);
             }
-            None => { }
+            Some(x11_rs::Event::Expose) | None => {
+            }
         }
 
         // Debug print the frames per second
@@ -90,10 +95,10 @@ fn main() {
         // Prepare the game state for the game logic
         let mut game = Game {
             framebuffer: &mut window.framebuffer,
-            width: GAME_WINDOW_WIDTH,
-            height: GAME_WINDOW_HEIGHT,
-            error: Ok(()),
-            buttons_pressed: &buttons_pressed,
+            width:       GAME_WINDOW_WIDTH,
+            height:      GAME_WINDOW_HEIGHT,
+            error:       Ok(()),
+            buttons:     &buttons,
         };
 
         // Call the event code

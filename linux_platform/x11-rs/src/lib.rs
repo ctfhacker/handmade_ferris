@@ -28,8 +28,6 @@ extern "system" {
     fn XMapWindow(display: *mut Display, window: Window) -> u32;
     fn XSelectInput(display: *mut Display, window: Window, event_mask: i64) -> i32;
     fn XNextEvent(display: *mut Display, event: *mut XEvent) -> i32;
-    fn XFillRectangle(display: *mut Display, event: *mut XEvent, gc: GC,
-        x: i32, y: i32, width: u32, height: u32) -> i32;
     fn XCreateImage(display: *mut Display, visual: *mut Visual, depth: u32, format: i32,
         offset: i32, data: *const u32, width: u32, height: u32, bitmap_pad: i32, 
         bytes_per_line: u32) -> *mut XImage;
@@ -40,19 +38,6 @@ extern "system" {
     fn XCheckWindowEvent(display: *mut Display, window: Window, mask: i64, 
         found_event: *mut XEvent) -> bool;
     fn XFlush(display: *mut Display) -> u32;
-
-    fn XkbSetAutoRepeatRate(
-        // connection to X server
-        display: *mut Display, 
-
-        // device to configure, or XkbUseCoreKbd (aka 0x100)
-        device_spec: u32, 
-
-        // initial delay, ms
-        timeout: u32, 
-
-        // delay between repeats
-        interval: u32) -> bool;
 }
 
 #[repr(C)]
@@ -231,8 +216,9 @@ impl SimpleWindow {
         if found {
             let res = event.type_.into();
             if matches!(res, Event::KeyPress(_) | Event::KeyRelease(_)) {
+                #[allow(clippy::cast_ptr_alignment)]
                 let key: &KeyEvent = unsafe {
-                    &*(event.pad.as_ptr() as *const KeyEvent)
+                    &*(event.pad.as_ptr().cast::<KeyEvent>())
                 };
 
                 let chr = match key.keycode {

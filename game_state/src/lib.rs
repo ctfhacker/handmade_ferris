@@ -84,7 +84,7 @@ pub struct Game<'a>  {
     pub buttons: &'a [bool; Button::Count as usize]
 }
 
-/// Typed `f32` representing number of meters
+/// Typed `f32` representing number of meters.
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub struct Meters(f32);
@@ -207,11 +207,22 @@ pub struct Chunk {
     pub offset: u16
 }
 
-/// An absolute tile location in the world
+/// An absolute tile location in the world, constrained to only be [`0`, `MAX`) in value.
+///
+///```
+/// let mut x = AbsoluteTile::<16>(0, 15);
+/// let mut y = AbsoluteTile::<9>(0, 8);
+///
+/// x.increment(1);
+/// assert_eq!(x, AbsoluteTile::from_chunk_offset(1, 0));
+/// y.increment(1);
+/// assert_eq!(y, AbsoluteTile::from_chunk_offset(1, 0));
+/// ```
 #[derive(Copy, Clone)]
-pub struct AbsoluteTile(u32);
+pub struct AbsoluteTile<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>(u32);
 
-impl std::fmt::Debug for AbsoluteTile {
+impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> std::fmt::Debug 
+        for AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Chunk { chunk_id, offset } = self.into_chunk();
 
@@ -222,9 +233,11 @@ impl std::fmt::Debug for AbsoluteTile {
     }
 }
 
-impl AbsoluteTile {
+impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> 
+        AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
     /// Get an [`AbsoluteTile`] from the combined `chunk` and `offset`
-    pub fn from_chunk_offset(chunk: u32, offset: u32) -> AbsoluteTile {
+    pub fn from_chunk_offset(chunk: u32, offset: u32) 
+            -> AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
         AbsoluteTile((chunk << CHUNK_SHIFT) | (offset & CHUNK_MASK))
     }
 
@@ -243,15 +256,21 @@ impl AbsoluteTile {
     /// * If `CHUNK_MASK` doens't fit in a u16
     pub fn increment(&mut self, val: u32) {
         let mut chunk = self.into_chunk();
-        let new_offset = u32::from(chunk.offset).wrapping_add(val);
-        if new_offset & CHUNK_MASK == new_offset {
-            // No overflow occured, still in the same chunk
-            chunk.offset = u16::try_from(new_offset).unwrap();
+        if let Some(new_offset) = u32::from(chunk.offset).checked_add(val) {
+            if new_offset < u32::try_from(MAX_OFFSET).unwrap() {
+                // No overflow occured, still in the same chunk
+                chunk.offset = u16::try_from(new_offset).unwrap();
+            } else {
+                // Tile MAX value Overflow occured, moving to the next chunk
+                chunk.offset    = 0;
+                chunk.chunk_id += 1;
+            }
         } else {
-            // Overflow occured, moving to the next chunk
+            // u32 Overflow occured, moving to the next chunk
             chunk.offset    = 0;
             chunk.chunk_id += 1;
         }
+
         *self = chunk.into();
     }
 
@@ -262,35 +281,66 @@ impl AbsoluteTile {
     /// * If `CHUNK_MASK` doens't fit in a u16
     pub fn decrement(&mut self, val: u32) {
         let mut chunk = self.into_chunk();
-        let new_offset = u32::from(chunk.offset).wrapping_sub(val);
-        if new_offset & CHUNK_MASK == new_offset {
+
+        if let Some(new_offset) = u32::from(chunk.offset).checked_sub(val) {
             // No overflow occured, still in the same chunk
             chunk.offset = u16::try_from(new_offset).unwrap();
         } else {
-            // Overflow occured, moving to the next chunk
-            chunk.offset    = CHUNK_MASK.try_into().unwrap();
-            chunk.chunk_id -= 1;
+            // u32 Overflow occured, moving to the next chunk
+            chunk.offset    = u16::try_from(MAX_OFFSET - 1).unwrap();
+            if let Some(chunk_id) = chunk.chunk_id.checked_sub(1) {
+                // No underflow, proceed as normal
+                chunk.chunk_id = chunk_id;
+            } else {
+                // Underflow detected, wrap chunk_id around to the max value
+                chunk.chunk_id = u32::try_from(MAX_CHUNK_ID - 1).unwrap();
+            }
         }
+
         *self = chunk.into();
     }
 }
 
-impl From<Chunk> for AbsoluteTile {
-    fn from(chunk: Chunk) -> AbsoluteTile {
-        AbsoluteTile(
+impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk> 
+        for AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
+    fn from(chunk: Chunk) -> AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
+        AbsoluteTile::<MAX_CHUNK_ID, MAX_OFFSET>(
             (chunk.chunk_id << CHUNK_SHIFT) | (u32::from(chunk.offset) & CHUNK_MASK)
         )
     }
 }
 
 /// A tile position in the world
+///
+/// The [`AbsoluteTile`] contains the `chunk` and specific tile in the chunk itself, while 
+/// the `tile_rel_*` contains the relative offset the entity is within 
+///
+/// Example:
+///
+/// Chunks:
+///
+/// let tile_map0 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
+///     [2, 0, 2],
+///     [0, 1, 0],
+///     [2, 0, 2],
+/// ]);
+
+/// let tile_map1 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
+///     [2, 0, 2],
+///     [0, 0, 0],
+///     [2, 0, 2],
+/// ]);
+
+
+/// let world = World::new([tile_map0, tile_map1]);
+/// 
 #[derive(Copy, Clone, Debug)]
 pub struct WorldPosition {
     /// The absolute tile value
-    pub x: AbsoluteTile,
+    pub x: AbsoluteTile<2, TILE_MAP_COLUMNS>,
 
     /// The absolute tile value
-    pub y: AbsoluteTile,
+    pub y: AbsoluteTile<2, TILE_MAP_ROWS>,
 
     /// x offset in the tile
     pub tile_rel_x: Meters,
@@ -306,7 +356,6 @@ impl WorldPosition {
         if self.tile_rel_x > TILE_SIDE_IN_METERS {
             let inc_by = self.tile_rel_x.div_euclid(*TILE_SIDE_IN_METERS);
             self.x.increment(inc_by.trunc_as_u32());
-
             self.tile_rel_x = Meters(self.tile_rel_x.rem_euclid(*TILE_SIDE_IN_METERS));
         }
 
@@ -319,11 +368,10 @@ impl WorldPosition {
         if self.tile_rel_y > TILE_SIDE_IN_METERS {
             let inc_by = self.tile_rel_y.div_euclid(*TILE_SIDE_IN_METERS);
             self.y.decrement(inc_by.trunc_as_u32());
-
             self.tile_rel_y = Meters(self.tile_rel_y.rem_euclid(*TILE_SIDE_IN_METERS));
         }
 
-        if self.tile_rel_y < TILE_SIDE_IN_METERS {
+        if self.tile_rel_y < Meters(0.0) {
             let dec_by = self.tile_rel_y.div_euclid(*TILE_SIDE_IN_METERS);
             self.y.increment(dec_by.abs().trunc_as_u32());
             self.tile_rel_y = Meters(self.tile_rel_y.rem_euclid(*TILE_SIDE_IN_METERS));

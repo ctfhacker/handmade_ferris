@@ -9,11 +9,28 @@ trait Tile: Copy + Into<Color> {}
 
 impl Tile for u8 {}
 
+macro_rules! dbg_hex {
+    () => {
+        println!("[{}:{}]", file!(), line!())
+    };
+    ($val:expr $(,)?) => {
+        match $val {
+            tmp => {
+                println!("[{}:{}] {} = {:#x?}", file!(), line!(), stringify!($val), &tmp);
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($(gcdbg!($val)),+,)
+    };
+}
+
 use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters};
 use game_state::{TILE_WIDTH, TILE_HEIGHT, Chunk, Truncate};
 use game_state::{Game, Result, Error, State};
 
-/// Generic tile map data
+/// Single chunk of tiles. A collection of these [`TileMaps`] make up an entire [`World`]
 struct TileMap<T: Tile, const WIDTH: usize, const HEIGHT: usize> 
 {
     /// Tile map data
@@ -37,8 +54,8 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT>
         //    x0->
         let x = usize::from(x);
         let y = HEIGHT - 1 - usize::from(y);
-        assert!(x < WIDTH,  "{} larger than WIDTH: {}", x, WIDTH);
-        assert!(y < HEIGHT, "{} larger than HEIGHT: {}", y, HEIGHT);
+        assert!(x < WIDTH,  "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
+        assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
 
         unsafe {
             self.data.get_unchecked(y).get_unchecked(x)
@@ -77,7 +94,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT>
 struct World<T: Tile, const WIDTH: usize, const HEIGHT: usize> 
 {
     /// Tile maps in the world
-    tile_maps: [TileMap<T, WIDTH, HEIGHT>; 2],
+    tile_maps: [TileMap<T, WIDTH, HEIGHT>; 4],
 
     /// Number of meters to step per frame
     step_per_frame: Meters
@@ -85,7 +102,7 @@ struct World<T: Tile, const WIDTH: usize, const HEIGHT: usize>
 
 impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
     /// Creatd a new world from the given game and 
-    pub fn new(tile_maps: [TileMap<T, WIDTH, HEIGHT>; 2]) -> Self {
+    pub fn new(tile_maps: [TileMap<T, WIDTH, HEIGHT>; 4]) -> Self {
 
         Self {
             tile_maps,
@@ -95,7 +112,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
 
     /// Get the [`TileMap`] at (`x`, `y`) in the World
     pub fn get_tilemap_at(&self, x: usize, y: usize) -> &TileMap<T, WIDTH, HEIGHT> {
-        let index = y * HEIGHT + x;
+        let index = y * 2 + x;
         assert!(index < self.tile_maps.len());
 
         unsafe {
@@ -131,7 +148,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         [2, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
         [2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+        [2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2],
     ]);
 
     let tile_map1 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
@@ -143,11 +160,34 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
         [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
         [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2],
+    ]);
+
+    let tile_map2 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
+        [2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2],
+        [2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
         [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
     ]);
 
+    let tile_map3 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+    ]);
 
-    let world = World::new([tile_map0, tile_map1]);
+    let world = World::new([tile_map2, tile_map3, tile_map0, tile_map1]);
 
     let mut new_player = state.player.position;
 
@@ -171,12 +211,14 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     }
 
     // Update the player coordinates based on the movement
+    dbg_hex!(new_player);
     new_player.canonicalize();
-
-    dbg!(new_player);
+    dbg_hex!(new_player);
 
     let Chunk { chunk_id: tile_map_x, offset: x_offset } = new_player.x.into_chunk();
     let Chunk { chunk_id: tile_map_y, offset: y_offset } = new_player.y.into_chunk();
+
+    dbg!(tile_map_x, tile_map_y);
 
     let tile_map = world.get_tilemap_at(
         usize::try_from(tile_map_x).unwrap(),

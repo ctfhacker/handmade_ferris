@@ -27,7 +27,8 @@ macro_rules! dbg_hex {
 }
 
 use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters};
-use game_state::{TILE_WIDTH, TILE_HEIGHT, Chunk, Truncate};
+use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT, Chunk};
+use game_state::{Truncate, GAME_WINDOW_HEIGHT};
 use game_state::{Game, Result, Error, State};
 
 /// Single chunk of tiles. A collection of these [`TileMaps`] make up an entire [`World`]
@@ -106,7 +107,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
 
         Self {
             tile_maps,
-            step_per_frame: Meters::new(0.3)
+            step_per_frame: Meters::new(0.1)
         }
     }
 
@@ -202,23 +203,24 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
         // Based on the button pressed, move the player
         match button {
-            Button::Up    => new_player.tile_rel_y -= world.step_per_frame,
-            Button::Down  => new_player.tile_rel_y += world.step_per_frame,
+            Button::Up    => new_player.tile_rel_y += world.step_per_frame,
+            Button::Down  => new_player.tile_rel_y -= world.step_per_frame,
             Button::Right => new_player.tile_rel_x += world.step_per_frame,
             Button::Left  => new_player.tile_rel_x -= world.step_per_frame,
             Button::Count => {}
         }
     }
 
-    // Update the player coordinates based on the movement
-    dbg_hex!(new_player);
+    // Update the player coordinates based on the movement. If the player has stepped
+    // beyond the bounds of the current tile, update the position to the new tile.
+    // dbg_hex!(new_player);
     new_player.canonicalize();
-    dbg_hex!(new_player);
+    // dbg_hex!(new_player);
 
     let Chunk { chunk_id: tile_map_x, offset: x_offset } = new_player.x.into_chunk();
     let Chunk { chunk_id: tile_map_y, offset: y_offset } = new_player.y.into_chunk();
 
-    dbg!(tile_map_x, tile_map_y);
+    // dbg!(tile_map_x, tile_map_y);
 
     let tile_map = world.get_tilemap_at(
         usize::try_from(tile_map_x).unwrap(),
@@ -227,20 +229,26 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Draw the tile map
     tile_map.draw(game)?;
 
-    let display_lower_left_y = f32::from(game.height - TILE_HEIGHT);
+    let display_lower_left_y = f32::from(GAME_WINDOW_HEIGHT);
 
-    let tile_upper_left_x = x_offset * TILE_WIDTH;
-    let tile_upper_left_y = display_lower_left_y - f32::from(y_offset * TILE_HEIGHT);
+    let tile_center_x = f32::from(x_offset * TILE_WIDTH + TILE_HALF_WIDTH);
+    let tile_center_y = display_lower_left_y 
+        - f32::from(y_offset * TILE_HEIGHT) 
+        - f32::from(TILE_HALF_HEIGHT);
 
-    // Draw the player
+    // Draw the player. 
     let player_height = f32::from(TILE_HEIGHT) * 0.75; 
     let player_width  = f32::from(TILE_WIDTH)  * 0.75; 
-    let player_upper_left_x  = *new_player.tile_rel_x.into_pixels() 
-        + f32::from(tile_upper_left_x);
-    let player_upper_left_y  = *new_player.tile_rel_y.into_pixels() + tile_upper_left_y;
+
+    let player_bottom_center_x = tile_center_x + *new_player.tile_rel_x.into_pixels();
+    let player_bottom_center_y = tile_center_y - *new_player.tile_rel_y.into_pixels() ;
+
+    let player_x  = player_bottom_center_x - player_width / 2.;
+    let player_y  = player_bottom_center_y - player_height;
 
     // Check that the potential moved to tile is valid (aka, zero)
     let mut valid = true; 
+    dbg!(x_offset, y_offset);
     if !matches!(tile_map.get_tile_at(x_offset, y_offset), 0) {
         valid = false; 
     }
@@ -250,12 +258,27 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         state.player.position = new_player;
     }
 
-    draw_rectangle(game, &Color::BLACK, f32::from(tile_upper_left_x), tile_upper_left_y,
+    // Debug draw the tile the player is currently standing on
+    if tile_center_y < 0.0 {
+        dbg!(display_lower_left_y);
+        dbg!(y_offset);
+        dbg!(y_offset * TILE_HEIGHT);
+        dbg!(TILE_HALF_HEIGHT);
+        dbg!(y_offset * TILE_HEIGHT - TILE_HALF_HEIGHT);
+        dbg!(tile_center_x, tile_center_y);
+    }
+    draw_rectangle(game, &Color::BLACK, 
+        tile_center_x - f32::from(TILE_HALF_WIDTH), 
+        tile_center_y - f32::from(TILE_HALF_HEIGHT),
         f32::from(TILE_WIDTH), f32::from(TILE_HEIGHT))?;
 
-    // println!("Player: ({}, {})", new_player_x.floor(), new_player_y.floor());
-    draw_rectangle(game, &Color::BLUE, player_upper_left_x, player_upper_left_y,
-        player_width, player_height)?;
+    draw_rectangle(game, &Color::GREEN, player_x, player_y,
+        player_width, player_height).unwrap();
+
+    draw_rectangle(game, &Color::RED, 
+        player_bottom_center_x - 2.0, 
+        player_bottom_center_y - 2.0,
+        4.0, 4.0).unwrap();
 
     Ok(()) 
 }
@@ -275,6 +298,7 @@ fn _test_gradient(game: &mut Game) {
 }
 
 /// Color represented by red, green, and blue pigments
+#[derive(Debug)]
 struct Color {
     /// Percentage of red color pigment from 0.0 .. 1.0
     red: Red,
@@ -300,6 +324,7 @@ impl From<u8> for Color {
 /// Creates the bounded color values to percentages of [0.0..1.0]
 macro_rules! make_color { ($color:ident) => {
         /// Red color bounded to the percentage of 0.0 to 1.0
+        #[derive(Debug)]
         struct $color(f32);
 
         impl $color {
@@ -397,7 +422,6 @@ fn fill_screen(game: &mut Game, color: &Color) {
 /// Fill a rectangle starting at the pixel (`pos_x`, `pos_y`) with a `width` and `height`
 fn draw_rectangle(game: &mut Game, color: &Color, 
         pos_x: f32, pos_y: f32, width: f32, height: f32) -> Result<()> {
-
     let upper_left_x  = pos_x;
     let upper_left_y  = pos_y;
     let lower_right_x = pos_x + width;

@@ -19,9 +19,17 @@ pub const GAME_WINDOW_HEIGHT: u16 = 540;
 #[allow(clippy::cast_possible_truncation)]
 pub const TILE_WIDTH: u16 = GAME_WINDOW_WIDTH / (TILE_MAP_COLUMNS as u16);
 
+/// Half of the width of a tile
+#[allow(clippy::cast_possible_truncation)]
+pub const TILE_HALF_WIDTH: u16 = GAME_WINDOW_WIDTH / (TILE_MAP_COLUMNS as u16) / 2;
+
 /// Height of a tile
 #[allow(clippy::cast_possible_truncation)]
 pub const TILE_HEIGHT: u16 = GAME_WINDOW_HEIGHT / (TILE_MAP_ROWS as u16);
+
+/// Half of the height of a tile
+#[allow(clippy::cast_possible_truncation)]
+pub const TILE_HALF_HEIGHT: u16 = GAME_WINDOW_HEIGHT / (TILE_MAP_ROWS as u16) / 2;
 
 /// Number of bits to shift the absolute tile position to get the chunk value
 pub const CHUNK_SHIFT: u32 = 8;
@@ -33,7 +41,10 @@ pub const CHUNK_MASK: u32 = 0xf;
 pub const CHUNK_DIMENSIONS: u32 = 2_u32.pow(CHUNK_SHIFT);
 
 /// Tile size in meters
-pub const TILE_SIDE_IN_METERS: Meters = Meters::const_new(1.4);
+pub const TILE_SIDE_IN_METERS: Meters = Meters::const_new(1.0);
+
+/// Tile size in meters
+pub const TILE_RADIUS_IN_METERS: Meters = Meters::const_new(TILE_SIDE_IN_METERS.0 / 2.);
 
 /// Tile size in pixels
 pub const TILE_SIDE_IN_PIXELS: Pixels = Pixels::const_new(60.0);
@@ -53,6 +64,20 @@ impl Truncate for f32 {
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     fn trunc_as_u32(self) -> u32 {
         self.trunc() as u32
+    }
+}
+
+/// Provides the `Round` trait for rounding `f32` to `u32`
+pub trait Round {
+    /// Truncate the given value 
+    fn round_as_i32(self) -> i32;
+}
+
+impl Round for f32 {
+    #[inline]
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    fn round_as_i32(self) -> i32 {
+        self.round() as i32
     }
 }
 
@@ -125,6 +150,19 @@ impl std::ops::SubAssign for Meters {
     }
 }
 
+impl std::ops::Sub<f32> for Meters {
+    type Output = Self;
+    fn sub(self, rhs: f32) -> Self::Output {
+        Meters(self.0 - rhs)
+    }
+}
+
+impl std::ops::SubAssign<f32> for Meters {
+    fn sub_assign(&mut self, rhs: f32) {
+        self.0 -= rhs;
+    }
+}
+
 /// Typed `f32` representing number of pixels
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
@@ -186,10 +224,10 @@ impl State {
         Self {
             player: Player {
                 position: WorldPosition {
-                    x: AbsoluteTile::from_chunk_offset(0, 7),
-                    y: AbsoluteTile::from_chunk_offset(0, 4),
-                    tile_rel_x: Meters::new(0.2),
-                    tile_rel_y: Meters::new(0.2),
+                    x: AbsoluteTile::from_chunk_offset(0, 8),
+                    y: AbsoluteTile::from_chunk_offset(0, 8),
+                    tile_rel_x: Meters::new(0.0),
+                    tile_rel_y: Meters::new(0.0),
                 }
             }
         }
@@ -233,6 +271,8 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> std::fmt::Debug
     }
 }
 
+
+
 impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> 
         AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
     /// Get an [`AbsoluteTile`] from the combined `chunk` and `offset`
@@ -247,6 +287,62 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>
             chunk_id: self.0 >> CHUNK_SHIFT,
             offset:   (self.0 & CHUNK_MASK) as u16
         }
+    }
+
+    /// Adjust the chunk ID by `val`
+    ///
+    /// # Panics
+    ///
+    /// * If `CHUNK_MASK` doens't fit in a u16
+    pub fn adjust(&mut self, val: i32) {
+        // Early return for adjusting by 0
+        if val == 0 {
+            return;
+        }
+
+        assert!(val == 1 || val == -1, "Adjusting by larger than 1 square");
+
+        let mut chunk = self.into_chunk();
+
+        match val {
+            1 => {
+                // If incrementing beyond the MAX_OFFSET, go to the next chunk
+                if usize::from(chunk.offset + 1) == MAX_OFFSET {
+                    chunk.chunk_id += 1;
+
+                    // Wrap around the world if going beyond the MAX_CHUNK_ID
+                    if usize::try_from(chunk.chunk_id).unwrap() == MAX_CHUNK_ID {
+                        chunk.chunk_id = 0;
+                    }
+
+                    chunk.offset = 0;
+                } else {
+                    // No new chunk, increment the offset in the current chunk
+                    chunk.offset += 1;
+                }
+            }
+            -1 => {
+                // If decrementing beyond 0, go to the previous chunk
+                if chunk.offset == 0 {
+                    // Wrap around the world if stepping beyond 0
+                    if chunk.chunk_id == 0 {
+                        chunk.chunk_id = u32::try_from(MAX_CHUNK_ID - 1).unwrap();
+                    } else {
+                        chunk.chunk_id -= 1;
+                    }
+
+                    // Set the new offset to the max offset of the new chunk
+                    chunk.offset = u16::try_from(MAX_OFFSET - 1).unwrap();
+                } else {
+                    // No new chunk, decrement the offset in the current chunk
+                    chunk.offset -= 1;
+                }
+            }
+            _ => unreachable!()
+        }
+        
+        // Re-write the modified chunk back
+        *self = chunk.into();
     }
 
     /// Increment the chunk ID by `val`
@@ -330,8 +426,7 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk>
 ///     [0, 0, 0],
 ///     [2, 0, 2],
 /// ]);
-
-
+///
 /// let world = World::new([tile_map0, tile_map1]);
 /// 
 #[derive(Copy, Clone, Debug)]
@@ -353,28 +448,20 @@ impl WorldPosition {
     /// Update the tile position if the relative tile position moved to an adjacent tile
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn canonicalize(&mut self) {
-        if self.tile_rel_x > TILE_SIDE_IN_METERS {
-            let inc_by = self.tile_rel_x.div_euclid(*TILE_SIDE_IN_METERS);
-            self.x.increment(inc_by.trunc_as_u32());
-            self.tile_rel_x = Meters(self.tile_rel_x.rem_euclid(*TILE_SIDE_IN_METERS));
+        self.x.adjust(self.tile_rel_x.round() as i32);
+        self.tile_rel_x -= self.tile_rel_x.round();
+
+        self.y.adjust(self.tile_rel_y.round() as i32);
+        self.tile_rel_y -= self.tile_rel_y.round();
+
+        if *self.tile_rel_x <= -1.0 || *self.tile_rel_x >= 1.0 {
+            dbg!(self);
+            panic!("Bad x");
         }
 
-        if self.tile_rel_x < TILE_SIDE_IN_METERS {
-            let dec_by = self.tile_rel_x.div_euclid(*TILE_SIDE_IN_METERS);
-            self.x.decrement(dec_by.abs().trunc_as_u32());
-            self.tile_rel_x = Meters(self.tile_rel_x.rem_euclid(*TILE_SIDE_IN_METERS));
-        }
-
-        if self.tile_rel_y > TILE_SIDE_IN_METERS {
-            let inc_by = self.tile_rel_y.div_euclid(*TILE_SIDE_IN_METERS);
-            self.y.decrement(inc_by.trunc_as_u32());
-            self.tile_rel_y = Meters(self.tile_rel_y.rem_euclid(*TILE_SIDE_IN_METERS));
-        }
-
-        if self.tile_rel_y < Meters(0.0) {
-            let dec_by = self.tile_rel_y.div_euclid(*TILE_SIDE_IN_METERS);
-            self.y.increment(dec_by.abs().trunc_as_u32());
-            self.tile_rel_y = Meters(self.tile_rel_y.rem_euclid(*TILE_SIDE_IN_METERS));
+        if *self.tile_rel_y <= -1.0 || *self.tile_rel_y >= 1.0 {
+            dbg!(self);
+            panic!("Bad y");
         }
     }
 }

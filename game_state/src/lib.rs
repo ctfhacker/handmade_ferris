@@ -244,6 +244,7 @@ impl State {
                 position: WorldPosition {
                     x: AbsoluteTile::from_chunk_offset(0, 5),
                     y: AbsoluteTile::from_chunk_offset(0, 6),
+                    z: 0,
                     tile_rel_x: Meters::new(0.0),
                     tile_rel_y: Meters::new(0.0),
                 }
@@ -421,11 +422,14 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk>
 /// the `tile_rel_*` contains the relative offset the entity is within 
 #[derive(Copy, Clone, Debug)]
 pub struct WorldPosition {
-    /// The absolute tile value
+    /// The absolute tile value in x
     pub x: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_COLUMNS>,
 
-    /// The absolute tile value
+    /// The absolute tile value in y
     pub y: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_ROWS>,
+
+    /// The floor height in z
+    pub z: u8,
 
     /// x offset in the tile
     pub tile_rel_x: Meters,

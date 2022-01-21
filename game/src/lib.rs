@@ -9,6 +9,7 @@ pub trait Tile: Copy + Into<Color> {}
 
 /// Type of tiles that inhabit the world
 #[derive(Debug, Copy, Clone)]
+#[repr(u8)]
 enum TileType {
     /// Empty tile
     Empty,

@@ -5,10 +5,15 @@
 #![feature(const_fn_trait_bound)]
 
 /// Required type for the tiles in a [`TileMap`]
-trait Tile: Copy + Into<Color> {}
+pub trait Tile: Copy + Into<Color> {}
 
 impl Tile for u8 {}
 
+/// Number of slots for potential tile maps
+const PREALLOC_TILE_MAPS: usize = 16;
+
+/// dbg! macro that prints `{:#x?}`
+#[allow(unused_macros)]
 macro_rules! dbg_hex {
     () => {
         println!("[{}:{}]", file!(), line!())
@@ -26,26 +31,23 @@ macro_rules! dbg_hex {
     };
 }
 
-use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters};
+use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters, Memory};
 use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT, Chunk};
 use game_state::{Truncate, GAME_WINDOW_HEIGHT};
-use game_state::{Game, Result, Error, State};
+use game_state::{Game, Result, Error, State, Rng};
 
-/// Single chunk of tiles. A collection of these [`TileMaps`] make up an entire [`World`]
-struct TileMap<T: Tile, const WIDTH: usize, const HEIGHT: usize> 
-{
+/// Single chunk of tiles. A collection of these [`TileMap`] make up an entire [`World`]
+pub struct TileMap<T: Tile, const WIDTH: usize, const HEIGHT: usize> {
     /// Tile map data
     data: [[T; WIDTH]; HEIGHT],
 }
 
-impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT> 
-{
-    /// Create a new [`TileMap`]
-    const fn new(data: [[T; WIDTH]; HEIGHT]) -> Self {
-        Self { data }
-    }
-
+impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT> {
     /// Get the `T` from the given `x` and `y` offset into the tilemap
+    ///
+    /// # Panics
+    ///
+    /// * Requested (x, y) is outside the bounds of the [`TileMap`]
     pub fn get_tile_at(&self, x: u16, y: u16) -> &T {
         // Convert the coords to be standard coords
         // ^ |
@@ -89,37 +91,107 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT>
 
         Ok(())
     }
+
+    /// Set the given `T` to (`x`, `y`) in the [`TileMap`]
+    ///
+    /// # Panics
+    ///
+    /// * Requested (x, y) is outside the bounds of the [`TileMap`]
+    pub fn set_tile_at(&mut self, x: u16, y: u16, val: T) {
+        // Convert the coords to be standard coords
+        // ^ |
+        // | |
+        // y0|
+        //   +-----
+        //    x0->
+        let x = usize::from(x);
+        let y = HEIGHT - 1 - usize::from(y);
+        assert!(x < WIDTH,  "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
+        assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
+
+        unsafe {
+            let ptr = self.data.get_unchecked_mut(y).get_unchecked_mut(x);
+            (*ptr) = val;
+        }
+    }
 }
 
 /// World containing many tile maps
-struct World<T: Tile, const WIDTH: usize, const HEIGHT: usize> 
-{
+#[derive(Debug)]
+pub struct World<T: Tile, const WIDTH: usize, const HEIGHT: usize> {
     /// Tile maps in the world
-    tile_maps: [TileMap<T, WIDTH, HEIGHT>; 4],
+    tile_maps: [*mut TileMap<T, WIDTH, HEIGHT>; PREALLOC_TILE_MAPS],
+
+    /// (x, y) tile_map pairing which index corresponds to the index in `tile_maps`
+    /// containg the pointer to the `tile_map`
+    tile_map_indexes: [Option<(u32, u32)>; PREALLOC_TILE_MAPS],
+
+    /// Index to the next tile_map slot
+    next_tile_map_index: usize,
 
     /// Number of meters to step per frame
-    step_per_frame: Meters
+    pub step_per_frame: Meters
 }
 
 impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
-    /// Creatd a new world from the given game and 
-    pub fn new(tile_maps: [TileMap<T, WIDTH, HEIGHT>; 4]) -> Self {
-
-        Self {
-            tile_maps,
-            step_per_frame: Meters::new(0.1)
-        }
+    /// Initialize the world from the given tilemaps
+    pub fn init(&mut self) {
+        self.tile_maps = [std::ptr::null_mut(); PREALLOC_TILE_MAPS];
+        self.tile_map_indexes = [None; PREALLOC_TILE_MAPS];
+        self.next_tile_map_index = 0;
+        self.step_per_frame = Meters::new(0.1);
     }
 
-    /// Get the [`TileMap`] at (`x`, `y`) in the World
-    pub fn get_tilemap_at(&self, x: usize, y: usize) -> &TileMap<T, WIDTH, HEIGHT> {
-        let index = y * 2 + x;
-        assert!(index < self.tile_maps.len());
+    /// Allocate a new [`TileMap`] at chunk id (`x`, `y`)
+    ///
+    /// # Panics
+    ///
+    /// * Out of slots to hold tile maps
+    pub fn alloc_tilemap_at(&mut self, memory: &mut Memory, x: u32, y: u32) 
+            -> &mut TileMap<T, WIDTH, HEIGHT>  {
+        assert!(self.next_tile_map_index < PREALLOC_TILE_MAPS, "Out of tile map slot");
+
+        println!("Allocating tile map at ({}, {})", x, y);
+
+        let curr_tile_index = self.next_tile_map_index;
+
+        // Tile map wasn't found, allocate a new one
+        let tile_map: *mut TileMap<T, WIDTH, HEIGHT> = memory.alloc();
+
+        // Set the tile map index for this newly allocated tilemap
+        self.tile_map_indexes[curr_tile_index] = Some((x, y));
+        self.tile_maps[curr_tile_index] = tile_map;
+
+        // Bump the tile map index
+        self.next_tile_map_index += 1;
 
         unsafe {
-            self.tile_maps.get_unchecked(index)
+            &mut *self.tile_maps[curr_tile_index]
         }
     }
+
+    /// Get the [`TileMap`] at (`x`, `y`) in the World or allocate a new [`TileMap`] if
+    /// the requested location is not yet allocated.
+    ///
+    /// # Panics
+    ///
+    /// * Sanity check of indexes is out of sync
+    pub fn get_tilemap_at(&mut self, x: u32, y: u32) 
+            -> Option<&mut TileMap<T, WIDTH, HEIGHT>> {
+        // Look for the requested (x, y) in the allocated tile maps and return the
+        // pointer if found
+        for (index, coord) in self.tile_map_indexes[..self.next_tile_map_index].iter().enumerate() {
+            assert!(coord.is_some(), "next_tile_map_index out of sync");
+
+            if coord.unwrap() == (x, y) {
+                return unsafe { Some(&mut *self.tile_maps[index]) };
+            }
+        }
+
+        // No tilemap was found
+        None
+    }
+
 }
 
 /// Update and render the current game state
@@ -129,10 +201,61 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
 /// * On 16 bit machines
 #[no_mangle]
 pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
+    // Initialize the game memory if not already initialized
+    if !game.memory.initialized {
+        let world: *mut World<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS> = game.memory.alloc();
+
+        // Initialize the world
+        unsafe { 
+            (*world).init();
+        }
+
+        // Game world is now initialized
+        game.memory.initialized = true;
+    }
+
+    // 
     let res = _game_update_and_render(game, state);
 
     // Update the error code between the game logic library and the platform layer
     game.error = res;
+}
+
+/// Randomly initialize a tile map
+#[allow(clippy::cast_possible_truncation)]
+fn init_tile_map(rng: &mut Rng, 
+                 tile_map: &mut TileMap<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>) {
+    for y in 0..TILE_MAP_ROWS {
+        for x in 0..TILE_MAP_COLUMNS {
+
+            // Draw the floor/ceiling with doors
+            if y == 0 || y == TILE_MAP_ROWS - 1 {
+                let mid_point = TILE_MAP_COLUMNS / 2;
+                if (mid_point-1..=mid_point+1).contains(&x) {
+                    tile_map.set_tile_at(x as u16, y as u16, 0);
+                } else {
+                    tile_map.set_tile_at(x as u16, y as u16, 1);
+                }
+                continue;
+            }
+
+            // Draw the walls with doors
+            if x == 0 || x == TILE_MAP_COLUMNS - 1 {
+                let mid_point = TILE_MAP_ROWS / 2;
+                if (mid_point-1..=mid_point+1).contains(&y) {
+                    tile_map.set_tile_at(x as u16, y as u16, 0);
+                } else {
+                    tile_map.set_tile_at(x as u16, y as u16, 1);
+                }
+                continue;
+            }
+
+            // Randomly set values in a room
+            if rng.next() % 16 == 0 {
+                tile_map.set_tile_at(x as u16, y as u16, 1);
+            }
+        }
+    }
 }
 
 /// Actual game logic code that can return a [`Result`]
@@ -140,55 +263,11 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Blanket fill the screen with green to ensure all the screen is actually being drawn
     fill_screen(game, &Color::GREEN);
 
-    let tile_map0 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
-        [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-        [2, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 2],
-        [2, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-        [2, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0],
-        [2, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0],
-        [2, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2],
-    ]);
-
-    let tile_map1 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
-        [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-        [2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2],
-    ]);
-
-    let tile_map2 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
-        [2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2],
-        [2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-    ]);
-
-    let tile_map3 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-    ]);
-
-    let world = World::new([tile_map2, tile_map3, tile_map0, tile_map1]);
+    // Get the world structure which is always at the beginning of the persistent memory
+    let world = unsafe {
+        #[allow(clippy::cast_ptr_alignment)]
+        &mut *(game.memory.data.as_mut_ptr().cast::<World<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
+    };
 
     let mut new_player = state.player.position;
 
@@ -207,24 +286,43 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
             Button::Down  => new_player.tile_rel_y -= world.step_per_frame,
             Button::Right => new_player.tile_rel_x += world.step_per_frame,
             Button::Left  => new_player.tile_rel_x -= world.step_per_frame,
+            Button::DecreaseSpeed => {
+                world.step_per_frame -= Meters::new(0.05);
+                world.step_per_frame = world.step_per_frame.clamp(0.05, 1.0).into();
+            }
+            Button::IncreaseSpeed => {
+                world.step_per_frame += Meters::new(0.05);
+                world.step_per_frame = world.step_per_frame.clamp(0.05, 1.0).into();
+            }
             Button::Count => {}
         }
     }
 
     // Update the player coordinates based on the movement. If the player has stepped
     // beyond the bounds of the current tile, update the position to the new tile.
-    // dbg_hex!(new_player);
     new_player.canonicalize();
     // dbg_hex!(new_player);
 
     let Chunk { chunk_id: tile_map_x, offset: x_offset } = new_player.x.into_chunk();
     let Chunk { chunk_id: tile_map_y, offset: y_offset } = new_player.y.into_chunk();
 
-    // dbg!(tile_map_x, tile_map_y);
+    let mut tile_map = world.get_tilemap_at(tile_map_x, tile_map_y);
 
-    let tile_map = world.get_tilemap_at(
-        usize::try_from(tile_map_x).unwrap(),
-        usize::try_from(tile_map_y).unwrap());
+    // If the requested tile map isn't allocated, allocate and init a new one
+    if tile_map.is_none() {
+        let new_map = world.alloc_tilemap_at(game.memory, tile_map_x, tile_map_y);
+
+        init_tile_map(&mut state.rng, new_map);
+
+        // Set the newly created map to be drawn
+        tile_map = Some(new_map);
+    }
+
+    assert!(tile_map.is_some(), "Failed to create a new tile map: ({:#x}, {:#x})", 
+        tile_map_x, tile_map_y);
+
+    // Always confirmed to be some, safe unwrap
+    let tile_map = tile_map.unwrap();
 
     // Draw the tile map
     tile_map.draw(game)?;
@@ -248,7 +346,6 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     // Check that the potential moved to tile is valid (aka, zero)
     let mut valid = true; 
-    dbg!(x_offset, y_offset);
     if !matches!(tile_map.get_tile_at(x_offset, y_offset), 0) {
         valid = false; 
     }
@@ -299,7 +396,7 @@ fn _test_gradient(game: &mut Game) {
 
 /// Color represented by red, green, and blue pigments
 #[derive(Debug)]
-struct Color {
+pub struct Color {
     /// Percentage of red color pigment from 0.0 .. 1.0
     red: Red,
 

@@ -3,6 +3,9 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(const_fn_fn_ptr_basics)]
 
+mod rng;
+pub use rng::Rng;
+
 /// Number of COLUMNS in the tile map
 pub const TILE_MAP_COLUMNS: usize = 16;
 
@@ -39,6 +42,9 @@ pub const CHUNK_MASK: u32 = 0xf;
 
 /// Number of tiles per x and y axis in a chunk
 pub const CHUNK_DIMENSIONS: u32 = 2_u32.pow(CHUNK_SHIFT);
+
+/// Maximum number of chunks
+pub const MAX_NUM_CHUNKS: usize = (u32::MAX >> CHUNK_SHIFT) as usize;
 
 /// Tile size in meters
 pub const TILE_SIDE_IN_METERS: Meters = Meters::const_new(1.0);
@@ -106,7 +112,16 @@ pub struct Game<'a>  {
     pub error: Result<()>,
 
     /// Current buttons pressed
-    pub buttons: &'a [bool; Button::Count as usize]
+    pub buttons: &'a [bool; Button::Count as usize],
+
+    /// Reference to the memory backing the game
+    pub memory: &'a mut Memory,
+}
+
+impl From<f32> for Meters {
+    fn from(val: f32) -> Meters {
+        Meters::new(val)
+    }
 }
 
 /// Typed `f32` representing number of meters.
@@ -215,7 +230,10 @@ pub struct Player {
 #[derive(Debug)]
 pub struct State {
     /// Player in the game
-    pub player: Player
+    pub player: Player,
+
+    /// Random number generator
+    pub rng: Rng,
 }
 
 impl State {
@@ -224,12 +242,13 @@ impl State {
         Self {
             player: Player {
                 position: WorldPosition {
-                    x: AbsoluteTile::from_chunk_offset(0, 8),
-                    y: AbsoluteTile::from_chunk_offset(0, 8),
+                    x: AbsoluteTile::from_chunk_offset(0, 5),
+                    y: AbsoluteTile::from_chunk_offset(0, 6),
                     tile_rel_x: Meters::new(0.0),
                     tile_rel_y: Meters::new(0.0),
                 }
-            }
+            },
+            rng: Rng::new()
         }
 
     }
@@ -246,16 +265,6 @@ pub struct Chunk {
 }
 
 /// An absolute tile location in the world, constrained to only be [`0`, `MAX`) in value.
-///
-///```
-/// let mut x = AbsoluteTile::<16>(0, 15);
-/// let mut y = AbsoluteTile::<9>(0, 8);
-///
-/// x.increment(1);
-/// assert_eq!(x, AbsoluteTile::from_chunk_offset(1, 0));
-/// y.increment(1);
-/// assert_eq!(y, AbsoluteTile::from_chunk_offset(1, 0));
-/// ```
 #[derive(Copy, Clone)]
 pub struct AbsoluteTile<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>(u32);
 
@@ -410,32 +419,13 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk>
 ///
 /// The [`AbsoluteTile`] contains the `chunk` and specific tile in the chunk itself, while 
 /// the `tile_rel_*` contains the relative offset the entity is within 
-///
-/// Example:
-///
-/// Chunks:
-///
-/// let tile_map0 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
-///     [2, 0, 2],
-///     [0, 1, 0],
-///     [2, 0, 2],
-/// ]);
-
-/// let tile_map1 = TileMap::<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>::new([
-///     [2, 0, 2],
-///     [0, 0, 0],
-///     [2, 0, 2],
-/// ]);
-///
-/// let world = World::new([tile_map0, tile_map1]);
-/// 
 #[derive(Copy, Clone, Debug)]
 pub struct WorldPosition {
     /// The absolute tile value
-    pub x: AbsoluteTile<2, TILE_MAP_COLUMNS>,
+    pub x: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_COLUMNS>,
 
     /// The absolute tile value
-    pub y: AbsoluteTile<2, TILE_MAP_ROWS>,
+    pub y: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_ROWS>,
 
     /// x offset in the tile
     pub tile_rel_x: Meters,
@@ -446,6 +436,10 @@ pub struct WorldPosition {
 
 impl WorldPosition {
     /// Update the tile position if the relative tile position moved to an adjacent tile
+    ///
+    /// # Panics
+    ///
+    /// * Fails to pass sanity check for the relative tile position
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn canonicalize(&mut self) {
         self.x.adjust(self.tile_rel_x.round() as i32);
@@ -481,6 +475,12 @@ pub enum Button {
     /// Move right
     Right,
 
+    /// Decrease player speed
+    DecreaseSpeed,
+
+    /// Increase player speed
+    IncreaseSpeed,
+
     /// Total number of button attributes
     Count,
     // Nothing should be added under this value
@@ -495,8 +495,62 @@ impl Button {
             Button::Down,
             Button::Left,
             Button::Right,
+            Button::DecreaseSpeed,
+            Button::IncreaseSpeed,
         ];
 
         VALS[val]
+    }
+}
+
+/// Memory chunk allocated for the game with a basic bump allocator
+pub struct Memory {
+    /// Has this memory been initialized by the game yet
+    pub initialized: bool,
+
+    /// Data bytes for this memory, allocated by the platform
+    pub data: Vec<u8>,
+
+    /// Size of the data allocation
+    pub data_len: usize,
+
+    /// Offset to the next allocation in the memory region
+    pub next_allocation: usize
+}
+
+impl Memory {
+    /// Allocate a new chunk of memory
+    pub fn new(size: usize) -> Self {
+        Self {
+            initialized:     false,
+            data:            Vec::with_capacity(size),
+            data_len:        size,
+            next_allocation: 0
+
+        }
+    }
+
+    /// Allocate `T` in the allocated game memory
+    ///
+    /// # Panics
+    ///
+    /// * Out of allocated memory
+    pub fn alloc<T: Sized>(&mut self) -> *mut T {
+        assert!(self.next_allocation + std::mem::size_of::<T>() < self.data_len, 
+            "Out of game memory");
+
+        // Get the resulting address
+        let result = unsafe { 
+            self.data.as_mut_ptr().add(self.next_allocation)
+        };
+
+        // Bump the allocation to fit the requested type
+        self.next_allocation += std::mem::size_of::<T>();
+
+        // 64 bit align the next allocation
+        self.next_allocation = (self.next_allocation + 0xf) & !0xf;
+
+        // Return the pointer to the allocation
+        result.cast::<T>()
     }
 }

@@ -2,7 +2,7 @@
 #![feature(asm)]
 
 mod dl;
-use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game, Button};
+use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game, Button, Memory};
 
 /// Target FPS for the game
 const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
@@ -40,6 +40,8 @@ fn main() {
 
     let mut buttons = [false; Button::Count as usize];
 
+    let mut memory = Memory::new(2 * 1024 * 1024);
+
     // Main event loop
     for frame in 0.. {
         // Begin the timer for this loop iteration
@@ -59,6 +61,8 @@ fn main() {
                     'a' => Some(Button::Left),
                     's' => Some(Button::Down),
                     'd' => Some(Button::Right),
+                    'n' => Some(Button::DecreaseSpeed),
+                    'm' => Some(Button::IncreaseSpeed),
                       _ => None
                 };
     
@@ -72,6 +76,8 @@ fn main() {
                     'a' => Some(Button::Left),
                     's' => Some(Button::Down),
                     'd' => Some(Button::Right),
+                    'n' => Some(Button::DecreaseSpeed),
+                    'm' => Some(Button::IncreaseSpeed),
                       _ => None
                 };
     
@@ -99,6 +105,7 @@ fn main() {
             height:      GAME_WINDOW_HEIGHT,
             error:       Ok(()),
             buttons:     &buttons,
+            memory:      &mut memory
         };
 
         // Call the event code
@@ -106,6 +113,7 @@ fn main() {
 
         if let Err(e) = game.error {
             println!("ERR: {:?}", e);
+            panic!();
         }
 
         // Place the updated framebuffer into the X11 window

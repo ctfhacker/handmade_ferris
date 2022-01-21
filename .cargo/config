@@ -1,2 +1,0 @@
-[build.game]
-rustflags = ["-C", "prefer-dynamic=yes"]

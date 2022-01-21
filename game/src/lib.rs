@@ -7,7 +7,30 @@
 /// Required type for the tiles in a [`TileMap`]
 pub trait Tile: Copy + Into<Color> {}
 
-impl Tile for u8 {}
+/// Type of tiles that inhabit the world
+#[derive(Debug, Copy, Clone)]
+enum TileType {
+    /// Empty tile
+    Empty,
+
+    /// Wall tile
+    Wall,
+
+    /// Ladder tile
+    Ladder
+}
+
+impl Tile for TileType {}
+
+impl From<TileType> for Color {
+    fn from(tile: TileType) -> Color {
+        match tile {
+            TileType::Wall   => Color::YELLOW,
+            TileType::Empty  => Color::GREY,
+            TileType::Ladder => Color::BLUE,
+        }
+    }
+}
 
 /// Number of slots for potential tile maps
 const PREALLOC_TILE_MAPS: usize = 16;
@@ -109,6 +132,8 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT>
         assert!(x < WIDTH,  "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
         assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
 
+
+
         unsafe {
             let ptr = self.data.get_unchecked_mut(y).get_unchecked_mut(x);
             (*ptr) = val;
@@ -122,9 +147,9 @@ pub struct World<T: Tile, const WIDTH: usize, const HEIGHT: usize> {
     /// Tile maps in the world
     tile_maps: [*mut TileMap<T, WIDTH, HEIGHT>; PREALLOC_TILE_MAPS],
 
-    /// (x, y) tile_map pairing which index corresponds to the index in `tile_maps`
+    /// (x, y, z) tile_map pairing which index corresponds to the index in `tile_maps`
     /// containg the pointer to the `tile_map`
-    tile_map_indexes: [Option<(u32, u32)>; PREALLOC_TILE_MAPS],
+    tile_map_indexes: [Option<(u32, u32, u8)>; PREALLOC_TILE_MAPS],
 
     /// Index to the next tile_map slot
     next_tile_map_index: usize,
@@ -147,11 +172,11 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Out of slots to hold tile maps
-    pub fn alloc_tilemap_at(&mut self, memory: &mut Memory, x: u32, y: u32) 
+    pub fn alloc_tilemap_at(&mut self, memory: &mut Memory, x: u32, y: u32, z: u8) 
             -> &mut TileMap<T, WIDTH, HEIGHT>  {
         assert!(self.next_tile_map_index < PREALLOC_TILE_MAPS, "Out of tile map slot");
 
-        println!("Allocating tile map at ({}, {})", x, y);
+        println!("Allocating tile map at ({}, {}, {})", x, y, z);
 
         let curr_tile_index = self.next_tile_map_index;
 
@@ -159,7 +184,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
         let tile_map: *mut TileMap<T, WIDTH, HEIGHT> = memory.alloc();
 
         // Set the tile map index for this newly allocated tilemap
-        self.tile_map_indexes[curr_tile_index] = Some((x, y));
+        self.tile_map_indexes[curr_tile_index] = Some((x, y, z));
         self.tile_maps[curr_tile_index] = tile_map;
 
         // Bump the tile map index
@@ -176,14 +201,14 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Sanity check of indexes is out of sync
-    pub fn get_tilemap_at(&mut self, x: u32, y: u32) 
+    pub fn get_tilemap_at(&mut self, x: u32, y: u32, z: u8) 
             -> Option<&mut TileMap<T, WIDTH, HEIGHT>> {
         // Look for the requested (x, y) in the allocated tile maps and return the
         // pointer if found
         for (index, coord) in self.tile_map_indexes[..self.next_tile_map_index].iter().enumerate() {
             assert!(coord.is_some(), "next_tile_map_index out of sync");
 
-            if coord.unwrap() == (x, y) {
+            if coord.unwrap() == (x, y, z) {
                 return unsafe { Some(&mut *self.tile_maps[index]) };
             }
         }
@@ -203,7 +228,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
 pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
     // Initialize the game memory if not already initialized
     if !game.memory.initialized {
-        let world: *mut World<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS> = game.memory.alloc();
+        let world: *mut World<TileType, TILE_MAP_COLUMNS, TILE_MAP_ROWS> = game.memory.alloc();
 
         // Initialize the world
         unsafe { 
@@ -224,7 +249,7 @@ pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
 /// Randomly initialize a tile map
 #[allow(clippy::cast_possible_truncation)]
 fn init_tile_map(rng: &mut Rng, 
-                 tile_map: &mut TileMap<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>) {
+                 tile_map: &mut TileMap<TileType, TILE_MAP_COLUMNS, TILE_MAP_ROWS>) {
     for y in 0..TILE_MAP_ROWS {
         for x in 0..TILE_MAP_COLUMNS {
 
@@ -232,9 +257,9 @@ fn init_tile_map(rng: &mut Rng,
             if y == 0 || y == TILE_MAP_ROWS - 1 {
                 let mid_point = TILE_MAP_COLUMNS / 2;
                 if (mid_point-1..=mid_point+1).contains(&x) {
-                    tile_map.set_tile_at(x as u16, y as u16, 0);
+                    tile_map.set_tile_at(x as u16, y as u16, TileType::Empty);
                 } else {
-                    tile_map.set_tile_at(x as u16, y as u16, 1);
+                    tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
                 }
                 continue;
             }
@@ -243,16 +268,21 @@ fn init_tile_map(rng: &mut Rng,
             if x == 0 || x == TILE_MAP_COLUMNS - 1 {
                 let mid_point = TILE_MAP_ROWS / 2;
                 if (mid_point-1..=mid_point+1).contains(&y) {
-                    tile_map.set_tile_at(x as u16, y as u16, 0);
+                    tile_map.set_tile_at(x as u16, y as u16, TileType::Empty);
                 } else {
-                    tile_map.set_tile_at(x as u16, y as u16, 1);
+                    tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
                 }
                 continue;
             }
 
             // Randomly set values in a room
+            if rng.next() % 64 == 0 {
+                tile_map.set_tile_at(x as u16, y as u16, TileType::Ladder);
+            }
+
+            // Randomly set values in a room
             if rng.next() % 16 == 0 {
-                tile_map.set_tile_at(x as u16, y as u16, 1);
+                tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
             }
         }
     }
@@ -266,7 +296,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Get the world structure which is always at the beginning of the persistent memory
     let world = unsafe {
         #[allow(clippy::cast_ptr_alignment)]
-        &mut *(game.memory.data.as_mut_ptr().cast::<World<u8, TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
+        &mut *(game.memory.data.as_mut_ptr().cast::<World<TileType, TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
     };
 
     let mut new_player = state.player.position;
@@ -306,11 +336,12 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     let Chunk { chunk_id: tile_map_x, offset: x_offset } = new_player.x.into_chunk();
     let Chunk { chunk_id: tile_map_y, offset: y_offset } = new_player.y.into_chunk();
 
-    let mut tile_map = world.get_tilemap_at(tile_map_x, tile_map_y);
+    let mut tile_map = world.get_tilemap_at(tile_map_x, tile_map_y, new_player.z);
 
     // If the requested tile map isn't allocated, allocate and init a new one
     if tile_map.is_none() {
-        let new_map = world.alloc_tilemap_at(game.memory, tile_map_x, tile_map_y);
+        let new_map = world.alloc_tilemap_at(game.memory, tile_map_x, tile_map_y, 
+            new_player.z);
 
         init_tile_map(&mut state.rng, new_map);
 
@@ -346,8 +377,18 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     // Check that the potential moved to tile is valid (aka, zero)
     let mut valid = true; 
-    if !matches!(tile_map.get_tile_at(x_offset, y_offset), 0) {
+
+    // Handle the tile type
+    
+    let next_tile = tile_map.get_tile_at(x_offset, y_offset);
+
+    // Block movement to walls
+    if matches!(next_tile, &TileType::Wall) {
         valid = false; 
+    }
+
+    if matches!(next_tile, &TileType::Ladder) {
+        new_player.z = (new_player.z + 1) % 2;
     }
 
     // If the move is valid, update the player

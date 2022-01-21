@@ -4,6 +4,11 @@
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(const_fn_trait_bound)]
 
+use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters, Memory, BitmapAsset};
+use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT, Chunk};
+use game_state::{Truncate, GAME_WINDOW_HEIGHT, Color};
+use game_state::{Game, Result, Error, State, Rng};
+
 /// Type of tiles that inhabit the world
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
@@ -50,10 +55,6 @@ macro_rules! dbg_hex {
     };
 }
 
-use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters, Memory};
-use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT, Chunk};
-use game_state::{Truncate, GAME_WINDOW_HEIGHT};
-use game_state::{Game, Result, Error, State, Rng};
 
 /// Single chunk of tiles. A collection of these [`TileMap`] make up an entire [`World`]
 pub struct TileMap<const WIDTH: usize, const HEIGHT: usize> {
@@ -417,13 +418,16 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         tile_center_y - f32::from(TILE_HALF_HEIGHT),
         f32::from(TILE_WIDTH), f32::from(TILE_HEIGHT))?;
 
-    draw_rectangle(game, &Color::GREEN, player_x, player_y,
-        player_width, player_height).unwrap();
+    // Draw the player
+    // draw_rectangle(game, &Color::GREEN, player_x, player_y, player_width, player_height)?;
+    draw_asset(game, game.asset, player_x, player_y, player_width, player_height)?;
 
     draw_rectangle(game, &Color::RED, 
         player_bottom_center_x - 2.0, 
         player_bottom_center_y - 2.0,
-        4.0, 4.0).unwrap();
+        4.0, 4.0)?;
+
+    draw_asset(game, game.asset, 100., 400., 1000., 1000.)?;
 
     Ok(()) 
 }
@@ -440,118 +444,6 @@ fn _test_gradient(game: &mut Game) {
             game.framebuffer[usize::try_from(index).unwrap()] = color;
         }; 
     } 
-}
-
-/// Color represented by red, green, and blue pigments
-#[derive(Debug)]
-pub struct Color {
-    /// Percentage of red color pigment from 0.0 .. 1.0
-    red: Red,
-
-    /// Percentage of green color pigment from 0.0 .. 1.0
-    green: Green,
-
-    /// Percentage of blue color pigment from 0.0 .. 1.0
-    blue: Blue,
-
-}
-
-impl From<u8> for Color {
-    fn from(val: u8) -> Color {
-        match val {
-            1 => Color::YELLOW,
-            2 => Color::WHITE,
-            _ => Color::GREY,
-        }
-    }
-}
-
-/// Creates the bounded color values to percentages of [0.0..1.0]
-macro_rules! make_color { ($color:ident) => {
-        /// Red color bounded to the percentage of 0.0 to 1.0
-        #[derive(Debug)]
-        struct $color(f32);
-
-        impl $color {
-            /// Create a new [`Red`] percentage, checked at compile time that it is
-            /// within the bounds [0.0..1.0]
-            const fn new(val: f32) -> $color { assert!(0.0 <= val && val <= 1.0,
-                concat!(stringify!($color), " value out of bounds [0.0..1.0]"));
-            $color(val) } }
-
-        impl std::ops::Deref for $color {
-            type Target = f32;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-    }
-}
-
-make_color!(Red);
-make_color!(Blue);
-make_color!(Green);
-
-impl Color {
-    /// The color red
-    #[allow(dead_code)]
-    const RED:   Color = Color { 
-        red: Red::new(1.), green: Green::new(0.), blue: Blue::new(0.) 
-    };
-
-    /// The color blue
-    #[allow(dead_code)]
-    const BLUE:  Color = Color { 
-        red: Red::new(0.), green: Green::new(0.), blue: Blue::new(1.) 
-    };
-
-    /// The color green
-    #[allow(dead_code)]
-    const GREEN: Color = Color { 
-        red: Red::new(0.), green: Green::new(1.), blue: Blue::new(0.) 
-    };
-
-    /// The color yellow
-    #[allow(dead_code)]
-    const YELLOW: Color = Color { 
-        red: Red::new(1.), green: Green::new(1.), blue: Blue::new(0.) 
-    };
-
-    /// The color white
-    #[allow(dead_code)]
-    const WHITE: Color = Color { 
-        red: Red::new(1.), green: Green::new(1.), blue: Blue::new(1.) 
-    };
-
-    /// The color white
-    #[allow(dead_code)]
-    const BLACK: Color = Color { 
-        red: Red::new(0.), green: Green::new(0.), blue: Blue::new(0.) 
-    }; 
-    /// The color white
-    #[allow(dead_code)]
-    const GREY: Color = Color { 
-        red: Red::new(0.5), green: Green::new(0.5), blue: Blue::new(0.5) 
-    };
-
-    /// Create a [`Color`] from `red`, `green`, and `blue` percentages
-    #[allow(dead_code)]
-    const fn rgb(red: f32, green: f32, blue: f32) -> Self {
-        Self {
-            red:   Red::new(red),
-            green: Green::new(green),
-            blue:  Blue::new(blue)
-        }
-    }
-
-    /// `u32` representation of the [`Color`]
-    #[inline]
-    fn as_u32(&self) -> u32 {
-        (*self.red   * 255.).trunc_as_u32() << 16 | 
-        (*self.green * 255.).trunc_as_u32() <<  8 |
-        (*self.blue  * 255.).trunc_as_u32()
-    }
 }
 
 /// Fill the game display with the given [`Color`]
@@ -588,6 +480,79 @@ fn draw_rectangle(game: &mut Game, color: &Color,
             let index = col * u32::from(game.width) + row;
             game.framebuffer[usize::try_from(index).unwrap()] = color.as_u32();
         }
+    }
+
+    // Success!
+    Ok(()) }
+
+/// Draw the given [`BitmapAsset`] at (`pos_x`, `pos_y`) on the screen
+fn draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32, 
+        rect_width: f32, rect_height: f32) -> Result<()> {
+    let width  = std::cmp::min(rect_width.trunc_as_u32(),  asset.width) as f32;
+    let height = std::cmp::min(rect_height.trunc_as_u32(), asset.height) as f32;
+    let bytes_per_color = 4;
+
+    // Because the BMP pixels are in bottom row -> top row order, if the requested width
+    // or height is less than the asset width or height, start the pixels array from the
+    // correct location. 
+    //
+    //                    +----------------------------+
+    //                    | Draw  |    BMP Asset       |
+    //                    |       |                    |
+    // Requested start  -->*      |                    |
+    //                    +-------+                    |
+    //                    |                            |
+    //                    |                            |
+    //                    |                            |
+    //                    |*                           |
+    //                    +^---------------------------+
+    //                     |
+    //                    Normal starting pixel
+    let mut starting_height = (asset.height - height.trunc_as_u32()) as usize;
+    if height + pos_y > game.height as f32 {
+        let offscreen = height + pos_y - game.height as f32;
+        starting_height += offscreen as usize;
+    } 
+
+    let starting_index = starting_height * asset.width as usize * 4;
+    let pixels_start = &asset.data[starting_index..];
+
+    let upper_left_x  = pos_x;
+    let upper_left_y  = pos_y;
+    let lower_right_x = pos_x + width;
+    let lower_right_y = pos_y + height;
+
+    let upper_left_x   = upper_left_x.trunc_as_u32().clamp(0,  u32::from(game.width));
+    let lower_right_x  = lower_right_x.trunc_as_u32().clamp(0, u32::from(game.width));
+    let upper_left_y   = upper_left_y.trunc_as_u32().clamp(0,  u32::from(game.height));
+    let lower_right_y  = lower_right_y.trunc_as_u32().clamp(0, u32::from(game.height));
+
+    // If the upper left corner is not the upper left corner, return;
+    if upper_left_x > lower_right_x || upper_left_y > lower_right_y {
+        return Err(Error::InvalidRectangle);
+    }
+
+    // Draw the asset at the requested location
+    for (row_index, row) in (upper_left_y..lower_right_y).rev().enumerate() {
+        // In the event the asset is larger than the requested draw size, update the
+        // pixel pointer to the next row of pixels and ignore the non-drawn pixels
+        let this_row = row_index * asset.width as usize * bytes_per_color;
+        let mut pixels = &pixels_start[this_row..];
+
+        for col in upper_left_x..lower_right_x {
+            let b = f32::from(pixels[0]) / 255.0;
+            let g = f32::from(pixels[1]) / 255.0;
+            let r = f32::from(pixels[2]) / 255.0;
+            let a = f32::from(pixels[3]) / 255.0;
+
+            let color = Color::rgba(r, g, b, a);
+
+            let index = row * u32::from(game.width) + col;
+            game.framebuffer[usize::try_from(index).unwrap()] = color.as_u32();
+
+            pixels = &pixels[4..];
+        }
+
     }
 
     // Success!

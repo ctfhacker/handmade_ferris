@@ -97,6 +97,18 @@ pub enum Error {
 /// Custom [`Result`] type for the game logic
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// A bitmap asset
+pub struct BitmapAsset<'a> {
+    /// Width of the bitmap in pixels
+    pub width:  u32,
+
+    /// Height of the bitmap in pixels
+    pub height: u32,
+
+    /// Reference to the pixels
+    pub data: &'a [u8],
+}
+
 /// Game/Memory state
 pub struct Game<'a>  {
     /// Framebuffer used for rendering to the window
@@ -116,6 +128,9 @@ pub struct Game<'a>  {
 
     /// Reference to the memory backing the game
     pub memory: &'a mut Memory,
+
+    /// Some offset to try and draw (width 
+    pub asset: &'a BitmapAsset<'a>
 }
 
 impl From<f32> for Meters {
@@ -554,5 +569,138 @@ impl Memory {
 
         // Return the pointer to the allocation
         result.cast::<T>()
+    }
+}
+
+
+/// Color represented by red, green, blue pigments with alpha channel
+#[derive(Debug)]
+pub struct Color {
+    /// Percentage of red color pigment from 0.0 .. 1.0
+    red: Red,
+
+    /// Percentage of green color pigment from 0.0 .. 1.0
+    green: Green,
+
+    /// Percentage of blue color pigment from 0.0 .. 1.0
+    blue: Blue,
+
+    /// Percentage of alpha from 0.0 .. 1.0
+    alpha: Alpha,
+
+}
+
+impl From<u8> for Color {
+    fn from(val: u8) -> Color {
+        match val {
+            1 => Color::YELLOW,
+            2 => Color::WHITE,
+            _ => Color::GREY,
+        }
+    }
+}
+
+/// Creates the bounded color values to percentages of [0.0..1.0]
+macro_rules! make_color { ($color:ident) => {
+        /// Red color bounded to the percentage of 0.0 to 1.0
+        #[derive(Debug)]
+        struct $color(f32);
+
+        impl $color {
+            /// Create a new [`Red`] percentage, checked at compile time that it is
+            /// within the bounds [0.0..1.0]
+            const fn new(val: f32) -> $color { 
+                assert!(0.0 <= val && val <= 1.0,
+                concat!(stringify!($color), " value out of bounds [0.0..1.0]"));
+                $color(val) 
+            } 
+        }
+
+        impl std::ops::Deref for $color {
+            type Target = f32;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+    }
+}
+
+make_color!(Red);
+make_color!(Blue);
+make_color!(Green);
+make_color!(Alpha);
+
+impl Color {
+    /// The color red
+    #[allow(dead_code)]
+    pub const RED:   Color = Color { 
+        red: Red::new(1.), green: Green::new(0.), blue: Blue::new(0.), alpha: Alpha::new(0.)
+    };
+
+    /// The color blue
+    #[allow(dead_code)]
+    pub const BLUE:  Color = Color { 
+        red: Red::new(0.), green: Green::new(0.), blue: Blue::new(1.), alpha: Alpha::new(0.)
+    };
+
+    /// The color green
+    #[allow(dead_code)]
+    pub const GREEN: Color = Color { 
+        red: Red::new(0.), green: Green::new(1.), blue: Blue::new(0.), alpha: Alpha::new(0.)
+    };
+
+    /// The color yellow
+    #[allow(dead_code)]
+    pub const YELLOW: Color = Color { 
+        red: Red::new(1.), green: Green::new(1.), blue: Blue::new(0.), alpha: Alpha::new(0.)
+    };
+
+    /// The color white
+    #[allow(dead_code)]
+    pub const WHITE: Color = Color { 
+        red: Red::new(1.), green: Green::new(1.), blue: Blue::new(1.), alpha: Alpha::new(0.)
+    };
+
+    /// The color white
+    #[allow(dead_code)]
+    pub const BLACK: Color = Color { 
+        red: Red::new(0.), green: Green::new(0.), blue: Blue::new(0.), alpha: Alpha::new(0.)
+    }; 
+    /// The color white
+    #[allow(dead_code)]
+    pub const GREY: Color = Color { 
+        red: Red::new(0.5), green: Green::new(0.5), blue: Blue::new(0.5), alpha: Alpha::new(0.)
+    };
+
+    /// Create a [`Color`] from `red`, `green`, and `blue` percentages
+    #[allow(dead_code)]
+    pub const fn rgb(red: f32, green: f32, blue: f32) -> Self {
+        Self {
+            red:   Red::new(red),
+            green: Green::new(green),
+            blue:  Blue::new(blue),
+            alpha: Alpha::new(0.0)
+        }
+    }
+
+    /// Create a [`Color`] from `red`, `green`, and `blue` percentages
+    #[allow(dead_code)]
+    pub const fn rgba(red: f32, green: f32, blue: f32, alpha: f32) -> Self {
+        Self {
+            red:   Red::new(red),
+            green: Green::new(green),
+            blue:  Blue::new(blue),
+            alpha: Alpha::new(alpha)
+        }
+    }
+
+    /// `u32` representation of the [`Color`]
+    #[inline]
+    pub fn as_u32(&self) -> u32 {
+        (*self.alpha * 255.).trunc_as_u32() << 24 | 
+        (*self.red   * 255.).trunc_as_u32() << 16 | 
+        (*self.green * 255.).trunc_as_u32() <<  8 |
+        (*self.blue  * 255.).trunc_as_u32()
     }
 }

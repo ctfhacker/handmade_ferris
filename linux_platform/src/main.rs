@@ -2,7 +2,7 @@
 #![feature(asm)]
 
 mod dl;
-use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game, Button, Memory};
+use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game, Button, Memory, BitmapAsset};
 
 /// Target FPS for the game
 const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
@@ -41,6 +41,13 @@ fn main() {
     let mut buttons = [false; Button::Count as usize];
 
     let mut memory = Memory::new(2 * 1024 * 1024);
+
+    let data = std::fs::read("test2.bmp").unwrap();
+    let offset = u32::from_le_bytes(data[0x0a..0x0a + 4].try_into().unwrap()) as usize;
+    let width  = u32::from_le_bytes(data[0x12..0x12 + 4].try_into().unwrap());
+    let height = u32::from_le_bytes(data[0x16..0x16 + 4].try_into().unwrap());
+    println!("Offset: {:#x}", offset);
+    let asset = BitmapAsset { width, height, data: &data[offset..] };
 
     // Main event loop
     for frame in 0.. {
@@ -105,7 +112,8 @@ fn main() {
             height:      GAME_WINDOW_HEIGHT,
             error:       Ok(()),
             buttons:     &buttons,
-            memory:      &mut memory
+            memory:      &mut memory,
+            asset:       &asset,
         };
 
         // Call the event code

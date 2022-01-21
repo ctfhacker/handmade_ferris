@@ -4,13 +4,10 @@
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(const_fn_trait_bound)]
 
-/// Required type for the tiles in a [`TileMap`]
-pub trait Tile: Copy + Into<Color> {}
-
 /// Type of tiles that inhabit the world
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
-enum TileType {
+pub enum TileType {
     /// Empty tile
     Empty,
 
@@ -20,8 +17,6 @@ enum TileType {
     /// Ladder tile
     Ladder
 }
-
-impl Tile for TileType {}
 
 impl From<TileType> for Color {
     fn from(tile: TileType) -> Color {
@@ -61,18 +56,18 @@ use game_state::{Truncate, GAME_WINDOW_HEIGHT};
 use game_state::{Game, Result, Error, State, Rng};
 
 /// Single chunk of tiles. A collection of these [`TileMap`] make up an entire [`World`]
-pub struct TileMap<T: Tile, const WIDTH: usize, const HEIGHT: usize> {
+pub struct TileMap<const WIDTH: usize, const HEIGHT: usize> {
     /// Tile map data
-    data: [[T; WIDTH]; HEIGHT],
+    data: [[TileType; WIDTH]; HEIGHT],
 }
 
-impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT> {
+impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
     /// Get the `T` from the given `x` and `y` offset into the tilemap
     ///
     /// # Panics
     ///
     /// * Requested (x, y) is outside the bounds of the [`TileMap`]
-    pub fn get_tile_at(&self, x: u16, y: u16) -> &T {
+    pub fn get_tile_at(&self, x: u16, y: u16) -> &TileType {
         // Convert the coords to be standard coords
         // ^ |
         // | |
@@ -121,7 +116,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT>
     /// # Panics
     ///
     /// * Requested (x, y) is outside the bounds of the [`TileMap`]
-    pub fn set_tile_at(&mut self, x: u16, y: u16, val: T) {
+    pub fn set_tile_at(&mut self, x: u16, y: u16, val: TileType) {
         // Convert the coords to be standard coords
         // ^ |
         // | |
@@ -144,9 +139,9 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> TileMap<T, WIDTH, HEIGHT>
 
 /// World containing many tile maps
 #[derive(Debug)]
-pub struct World<T: Tile, const WIDTH: usize, const HEIGHT: usize> {
+pub struct World<const WIDTH: usize, const HEIGHT: usize> {
     /// Tile maps in the world
-    tile_maps: [*mut TileMap<T, WIDTH, HEIGHT>; PREALLOC_TILE_MAPS],
+    tile_maps: [*mut TileMap<WIDTH, HEIGHT>; PREALLOC_TILE_MAPS],
 
     /// (x, y, z) tile_map pairing which index corresponds to the index in `tile_maps`
     /// containg the pointer to the `tile_map`
@@ -159,7 +154,7 @@ pub struct World<T: Tile, const WIDTH: usize, const HEIGHT: usize> {
     pub step_per_frame: Meters
 }
 
-impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
+impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
     /// Initialize the world from the given tilemaps
     pub fn init(&mut self) {
         self.tile_maps = [std::ptr::null_mut(); PREALLOC_TILE_MAPS];
@@ -174,7 +169,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
     ///
     /// * Out of slots to hold tile maps
     pub fn alloc_tilemap_at(&mut self, memory: &mut Memory, x: u32, y: u32, z: u8) 
-            -> &mut TileMap<T, WIDTH, HEIGHT>  {
+            -> &mut TileMap<WIDTH, HEIGHT>  {
         assert!(self.next_tile_map_index < PREALLOC_TILE_MAPS, "Out of tile map slot");
 
         println!("Allocating tile map at ({}, {}, {})", x, y, z);
@@ -182,7 +177,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
         let curr_tile_index = self.next_tile_map_index;
 
         // Tile map wasn't found, allocate a new one
-        let tile_map: *mut TileMap<T, WIDTH, HEIGHT> = memory.alloc();
+        let tile_map: *mut TileMap<WIDTH, HEIGHT> = memory.alloc();
 
         // Set the tile map index for this newly allocated tilemap
         self.tile_map_indexes[curr_tile_index] = Some((x, y, z));
@@ -202,22 +197,87 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Sanity check of indexes is out of sync
-    pub fn get_tilemap_at(&mut self, x: u32, y: u32, z: u8) 
-            -> Option<&mut TileMap<T, WIDTH, HEIGHT>> {
+    pub fn get_tilemap_at(&mut self, x: u32, y: u32, z: u8, memory: &mut Memory, 
+            rng: &mut Rng) -> &mut TileMap<WIDTH, HEIGHT> {
         // Look for the requested (x, y) in the allocated tile maps and return the
         // pointer if found
         for (index, coord) in self.tile_map_indexes[..self.next_tile_map_index].iter().enumerate() {
             assert!(coord.is_some(), "next_tile_map_index out of sync");
 
             if coord.unwrap() == (x, y, z) {
-                return unsafe { Some(&mut *self.tile_maps[index]) };
+                return unsafe { &mut *self.tile_maps[index] };
             }
         }
 
-        // No tilemap was found
-        None
+        // Allocate and initialize a new tile map
+        self.init_tile_map(x, y, z, memory, rng)
     }
 
+    /// Randomly initialize a tile map
+    #[allow(clippy::cast_possible_truncation)]
+    fn init_tile_map(&mut self, 
+            chunk_x: u32, chunk_y: u32, z: u8, memory: &mut Memory, rng: &mut Rng) ->
+            &mut TileMap<WIDTH, HEIGHT> {
+        // If a ladder is drawn, write the ladder in the adjacent floor location
+        let mut other_floor = None;
+
+        // No tilemap was found, allocate a new one
+        let tile_map = self.alloc_tilemap_at(memory, chunk_x, chunk_y, z);
+
+        let mut ladder_set = false;
+
+        for y in 0..TILE_MAP_ROWS {
+            for x in 0..TILE_MAP_COLUMNS {
+
+                // Draw the floor/ceiling with doors
+                if y == 0 || y == TILE_MAP_ROWS - 1 {
+                    let mid_point = TILE_MAP_COLUMNS / 2;
+                    if (mid_point-1..=mid_point+1).contains(&x) {
+                        tile_map.set_tile_at(x as u16, y as u16, TileType::Empty);
+                    } else {
+                        tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
+                    }
+                }
+
+                // Draw the walls with doors
+                else if x == 0 || x == TILE_MAP_COLUMNS - 1 {
+                    let mid_point = TILE_MAP_ROWS / 2;
+                    if (mid_point-1..=mid_point+1).contains(&y) {
+                        tile_map.set_tile_at(x as u16, y as u16, TileType::Empty);
+                    } else {
+                        tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
+                    }
+                }
+
+                // Randomly set values in a room
+                else if !ladder_set && rng.next() % 64 == 0 {
+                    tile_map.set_tile_at(x as u16, y as u16, TileType::Ladder);
+
+                    // Set that we need to set the ladder position in the adjacent floor
+                    other_floor = Some((x as u16, y as u16));
+
+                    // Only generate one ladder per floor
+                    ladder_set = true;
+
+                    continue;
+                }
+
+                // Randomly set values in a room
+                else if rng.next() % 16 == 0 {
+                    tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
+                }
+            }
+        }
+
+        // Get the same corresponding ladder on the other floor
+        if let Some((x, y)) = other_floor {
+            let other_z = (z + 1) % 2;
+            let other_tilemap = self.get_tilemap_at(chunk_x, chunk_y, other_z, memory, rng);
+            other_tilemap.set_tile_at(x, y, TileType::Ladder);
+        }
+
+        self.get_tilemap_at(chunk_x, chunk_y, z, memory, rng)
+    }
 }
 
 /// Update and render the current game state
@@ -229,7 +289,7 @@ impl<T: Tile, const WIDTH: usize, const HEIGHT: usize> World<T, WIDTH, HEIGHT> {
 pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
     // Initialize the game memory if not already initialized
     if !game.memory.initialized {
-        let world: *mut World<TileType, TILE_MAP_COLUMNS, TILE_MAP_ROWS> = game.memory.alloc();
+        let world: *mut World<TILE_MAP_COLUMNS, TILE_MAP_ROWS> = game.memory.alloc();
 
         // Initialize the world
         unsafe { 
@@ -247,47 +307,6 @@ pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
     game.error = res;
 }
 
-/// Randomly initialize a tile map
-#[allow(clippy::cast_possible_truncation)]
-fn init_tile_map(rng: &mut Rng, 
-                 tile_map: &mut TileMap<TileType, TILE_MAP_COLUMNS, TILE_MAP_ROWS>) {
-    for y in 0..TILE_MAP_ROWS {
-        for x in 0..TILE_MAP_COLUMNS {
-
-            // Draw the floor/ceiling with doors
-            if y == 0 || y == TILE_MAP_ROWS - 1 {
-                let mid_point = TILE_MAP_COLUMNS / 2;
-                if (mid_point-1..=mid_point+1).contains(&x) {
-                    tile_map.set_tile_at(x as u16, y as u16, TileType::Empty);
-                } else {
-                    tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
-                }
-                continue;
-            }
-
-            // Draw the walls with doors
-            if x == 0 || x == TILE_MAP_COLUMNS - 1 {
-                let mid_point = TILE_MAP_ROWS / 2;
-                if (mid_point-1..=mid_point+1).contains(&y) {
-                    tile_map.set_tile_at(x as u16, y as u16, TileType::Empty);
-                } else {
-                    tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
-                }
-                continue;
-            }
-
-            // Randomly set values in a room
-            if rng.next() % 64 == 0 {
-                tile_map.set_tile_at(x as u16, y as u16, TileType::Ladder);
-            }
-
-            // Randomly set values in a room
-            if rng.next() % 16 == 0 {
-                tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
-            }
-        }
-    }
-}
 
 /// Actual game logic code that can return a [`Result`]
 fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
@@ -297,9 +316,10 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Get the world structure which is always at the beginning of the persistent memory
     let world = unsafe {
         #[allow(clippy::cast_ptr_alignment)]
-        &mut *(game.memory.data.as_mut_ptr().cast::<World<TileType, TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
+        &mut *(game.memory.data.as_mut_ptr().cast::<World<TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
     };
 
+    let old_player = state.player.position;
     let mut new_player = state.player.position;
 
     for (button_id, is_pressed) in game.buttons.as_ref().iter().enumerate() {
@@ -337,24 +357,8 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     let Chunk { chunk_id: tile_map_x, offset: x_offset } = new_player.x.into_chunk();
     let Chunk { chunk_id: tile_map_y, offset: y_offset } = new_player.y.into_chunk();
 
-    let mut tile_map = world.get_tilemap_at(tile_map_x, tile_map_y, new_player.z);
-
-    // If the requested tile map isn't allocated, allocate and init a new one
-    if tile_map.is_none() {
-        let new_map = world.alloc_tilemap_at(game.memory, tile_map_x, tile_map_y, 
-            new_player.z);
-
-        init_tile_map(&mut state.rng, new_map);
-
-        // Set the newly created map to be drawn
-        tile_map = Some(new_map);
-    }
-
-    assert!(tile_map.is_some(), "Failed to create a new tile map: ({:#x}, {:#x})", 
-        tile_map_x, tile_map_y);
-
-    // Always confirmed to be some, safe unwrap
-    let tile_map = tile_map.unwrap();
+    let tile_map = world.get_tilemap_at(tile_map_x, tile_map_y, new_player.z,
+        game.memory, &mut state.rng);
 
     // Draw the tile map
     tile_map.draw(game)?;
@@ -388,7 +392,9 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         valid = false; 
     }
 
-    if matches!(next_tile, &TileType::Ladder) {
+    // Only go up/down a ladder if the player didn't originally come from a ladder
+    if matches!(next_tile, &TileType::Ladder) 
+            && ((new_player.x != old_player.x) || (new_player.y != old_player.y)) {
         new_player.z = (new_player.z + 1) % 2;
     }
 
@@ -585,5 +591,4 @@ fn draw_rectangle(game: &mut Game, color: &Color,
     }
 
     // Success!
-    Ok(())
-}
+    Ok(()) }

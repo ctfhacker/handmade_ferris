@@ -266,7 +266,7 @@ pub struct Chunk {
 }
 
 /// An absolute tile location in the world, constrained to only be [`0`, `MAX`) in value.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct AbsoluteTile<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>(u32);
 
 impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> std::fmt::Debug 
@@ -280,8 +280,6 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> std::fmt::Debug
          .finish()
     }
 }
-
-
 
 impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> 
         AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {

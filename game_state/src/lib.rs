@@ -13,6 +13,12 @@ pub const TILE_MAP_COLUMNS: usize = 16;
 /// Number of rows in the tile map
 pub const TILE_MAP_ROWS: usize = 9;
 
+/// The row in the center of the screen
+pub const SCREEN_CENTER_ROW: usize = TILE_MAP_ROWS / 2;
+
+/// The column in the center of the screen
+pub const SCREEN_CENTER_COLUMN: usize = TILE_MAP_COLUMNS / 2;
+
 /// Width of the game window
 pub const GAME_WINDOW_WIDTH:  u16 = 960;
 
@@ -39,7 +45,7 @@ pub const TILE_HALF_HEIGHT: u16 = GAME_WINDOW_HEIGHT / (TILE_MAP_ROWS as u16) / 
 pub const CHUNK_SHIFT: u32 = 8;
 
 /// Mask used to find the offset in a chunk for an absolute tile position
-pub const CHUNK_MASK: u32 = 0xf;
+pub const CHUNK_MASK: u32 = 0xff;
 
 /// Number of tiles per x and y axis in a chunk
 pub const CHUNK_DIMENSIONS: u32 = 2_u32.pow(CHUNK_SHIFT);
@@ -354,12 +360,19 @@ pub struct State {
     /// Player in the game
     pub player: Player,
 
+    /// Camera position to known where to draw the current screen
+    pub camera: WorldPosition,
+
     /// Random number generator
     pub rng: Rng,
 }
 
 impl State {
     /// Get the beginning game state
+    ///
+    /// # Panics
+    ///
+    /// If the screen center row or column doesn't fit in a u32 -- o.0
     pub fn reset() -> Self {
         Self {
             player: Player {
@@ -373,7 +386,15 @@ impl State {
 
                 direction: PlayerDirection::Front
             },
-
+            camera: WorldPosition {
+                    x: AbsoluteTile::from_chunk_offset(0, 
+                        SCREEN_CENTER_COLUMN.try_into().unwrap()),
+                    y: AbsoluteTile::from_chunk_offset(0, 
+                        SCREEN_CENTER_ROW.try_into().unwrap()),
+                    z: 0,
+                    tile_rel_x: Meters::new(0.0),
+                    tile_rel_y: Meters::new(0.0),
+            },
             rng: Rng::new(),
         }
     }
@@ -476,57 +497,6 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>
         // Re-write the modified chunk back
         *self = chunk.into();
     }
-
-    /// Increment the chunk ID by `val`
-    ///
-    /// # Panics
-    ///
-    /// * If `CHUNK_MASK` doens't fit in a u16
-    pub fn increment(&mut self, val: u32) {
-        let mut chunk = self.into_chunk();
-        if let Some(new_offset) = u32::from(chunk.offset).checked_add(val) {
-            if new_offset < u32::try_from(MAX_OFFSET).unwrap() {
-                // No overflow occured, still in the same chunk
-                chunk.offset = u16::try_from(new_offset).unwrap();
-            } else {
-                // Tile MAX value Overflow occured, moving to the next chunk
-                chunk.offset    = 0;
-                chunk.chunk_id += 1;
-            }
-        } else {
-            // u32 Overflow occured, moving to the next chunk
-            chunk.offset    = 0;
-            chunk.chunk_id += 1;
-        }
-
-        *self = chunk.into();
-    }
-
-    /// Decrement the chunk ID by `val`
-    ///
-    /// # Panics
-    ///
-    /// * If `CHUNK_MASK` doens't fit in a u16
-    pub fn decrement(&mut self, val: u32) {
-        let mut chunk = self.into_chunk();
-
-        if let Some(new_offset) = u32::from(chunk.offset).checked_sub(val) {
-            // No overflow occured, still in the same chunk
-            chunk.offset = u16::try_from(new_offset).unwrap();
-        } else {
-            // u32 Overflow occured, moving to the next chunk
-            chunk.offset    = u16::try_from(MAX_OFFSET - 1).unwrap();
-            if let Some(chunk_id) = chunk.chunk_id.checked_sub(1) {
-                // No underflow, proceed as normal
-                chunk.chunk_id = chunk_id;
-            } else {
-                // Underflow detected, wrap chunk_id around to the max value
-                chunk.chunk_id = u32::try_from(MAX_CHUNK_ID - 1).unwrap();
-            }
-        }
-
-        *self = chunk.into();
-    }
 }
 
 impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk> 
@@ -568,6 +538,9 @@ impl WorldPosition {
     /// * Fails to pass sanity check for the relative tile position
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn canonicalize(&mut self) {
+        assert!(self.tile_rel_x >= Meters::const_new(-1.5) && self.tile_rel_x <= Meters::const_new(1.5));
+        assert!(self.tile_rel_y >= Meters::const_new(-1.5) && self.tile_rel_y <= Meters::const_new(1.5));
+
         self.x.adjust(self.tile_rel_x.round() as i32);
         self.tile_rel_x -= self.tile_rel_x.round();
 

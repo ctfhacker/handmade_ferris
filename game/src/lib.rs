@@ -388,20 +388,19 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     let display_lower_left_y = f32::from(GAME_WINDOW_HEIGHT);
 
-    let tile_center_x = f32::from(x_offset * TILE_WIDTH + TILE_HALF_WIDTH);
+    let mut tile_center_x = f32::from(x_offset * TILE_WIDTH + TILE_HALF_WIDTH);
 
-    let tile_center_y = display_lower_left_y 
+    let mut tile_center_y = display_lower_left_y 
         - f32::from(y_offset * TILE_HEIGHT) 
         - f32::from(TILE_HALF_HEIGHT);
 
-    let player_bottom_center_x = tile_center_x + *new_player.tile_rel_x.into_pixels();
-    let player_bottom_center_y = tile_center_y - *new_player.tile_rel_y.into_pixels() ;
+    let mut player_bottom_center_x = tile_center_x + *new_player.tile_rel_x.into_pixels();
+    let mut player_bottom_center_y = tile_center_y - *new_player.tile_rel_y.into_pixels() ;
 
     // Check that the potential moved to tile is valid (aka, zero)
     let mut valid = true; 
 
     // Handle the tile type
-    
     let next_tile = tile_map.get_tile_at(x_offset, y_offset);
 
     // Block movement to walls
@@ -419,6 +418,17 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     if valid { 
         state.player.position  = new_player;
         state.player.direction = player_direction;
+    } else {
+        // Reset the coordinates for places where the player cannot move
+        let Chunk { chunk_id: _, offset: x_offset } = old_player.x.into_chunk();
+        let Chunk { chunk_id: _, offset: y_offset } = old_player.y.into_chunk();
+        tile_center_x = f32::from(x_offset * TILE_WIDTH + TILE_HALF_WIDTH);
+        tile_center_y = display_lower_left_y 
+            - f32::from(y_offset * TILE_HEIGHT) 
+            - f32::from(TILE_HALF_HEIGHT);
+
+        player_bottom_center_x = tile_center_x + *old_player.tile_rel_x.into_pixels();
+        player_bottom_center_y = tile_center_y - *old_player.tile_rel_y.into_pixels() ;
     }
 
     // Debug draw the tile the player is currently standing on

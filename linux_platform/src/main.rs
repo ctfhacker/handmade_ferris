@@ -1,11 +1,38 @@
 //! Linux platform for Handmade Ferris
 #![feature(asm)]
+#![feature(const_format_args)]
 
 mod dl;
 use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game, Button, Memory, BitmapAsset};
+use game_state::{PlayerBitmap, PlayerDirection};
 
 /// Target FPS for the game
 const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
+
+/// Loads the front/left/right/back player assets from `assets/early_data/test/test_hero_`
+macro_rules! load_asset {
+    ($name:ident) => {
+        // Get the path for this asset
+        let path  = concat!("assets/early_data/test/test_hero_", stringify!($name));
+        let cape  = format!("{}_cape.bmp", path);
+        let torso = format!("{}_torso.bmp", path);
+        let head  = format!("{}_head.bmp", path);
+        dbg!(&path, &cape, &torso, &head);
+
+        // Read each of the pieces of the asset
+        let cape  = std::fs::read(cape).unwrap();
+        let torso = std::fs::read(torso).unwrap();
+        let head  = std::fs::read(head).unwrap();
+
+        // Create the player bitmap for this asset
+        let $name = PlayerBitmap::from(
+            BitmapAsset::from_data(&head),
+            BitmapAsset::from_data(&torso),
+            BitmapAsset::from_data(&cape),
+            73.0,
+            174.0);
+    }
+}
 
 /// Number of microseconds available per frame
 ///
@@ -38,16 +65,27 @@ fn main() {
     // Get the reset game state
     let mut state = game_state::State::reset();
 
+    // Current button states for the game
     let mut buttons = [false; Button::Count as usize];
 
+    // Persistent memory for the game
     let mut memory = Memory::new(2 * 1024 * 1024);
+    // Load the player assets
+    load_asset!(front);
+    load_asset!(left);
+    load_asset!(right);
+    load_asset!(back);
 
-    let data = std::fs::read("test2.bmp").unwrap();
-    let offset = u32::from_le_bytes(data[0x0a..0x0a + 4].try_into().unwrap()) as usize;
-    let width  = u32::from_le_bytes(data[0x12..0x12 + 4].try_into().unwrap());
-    let height = u32::from_le_bytes(data[0x16..0x16 + 4].try_into().unwrap());
-    println!("Offset: {:#x}", offset);
-    let asset = BitmapAsset { width, height, data: &data[offset..] };
+    // Set the assets into the player assets array
+    let mut player_assets = [&front, &front, &front, &front];
+    player_assets[PlayerDirection::Front as usize] = &front;
+    player_assets[PlayerDirection::Back as usize]  = &back;
+    player_assets[PlayerDirection::Left as usize]  = &left;
+    player_assets[PlayerDirection::Right as usize] = &right;
+
+    let background = std::fs::read("assets/early_data/test/test_background.bmp")
+        .expect("Failed to read background asset");
+    let background = BitmapAsset::from_data(&background);
 
     // Main event loop
     for frame in 0.. {
@@ -107,13 +145,14 @@ fn main() {
 
         // Prepare the game state for the game logic
         let mut game = Game {
-            framebuffer: &mut window.framebuffer,
-            width:       GAME_WINDOW_WIDTH,
-            height:      GAME_WINDOW_HEIGHT,
-            error:       Ok(()),
-            buttons:     &buttons,
-            memory:      &mut memory,
-            asset:       &asset,
+            framebuffer:   &mut window.framebuffer,
+            width:         GAME_WINDOW_WIDTH,
+            height:        GAME_WINDOW_HEIGHT,
+            error:         Ok(()),
+            buttons:       &buttons,
+            memory:        &mut memory,
+            background:    &background,
+            player_assets,
         };
 
         // Call the event code

@@ -35,3 +35,7 @@ day given.
 
 ![Day035](./progress_pics/day035.png)
 
+### Day 039
+
+![Day039](./progress_pics/day039.png)
+

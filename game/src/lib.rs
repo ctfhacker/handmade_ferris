@@ -3,10 +3,11 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(const_fn_trait_bound)]
+#![feature(stmt_expr_attributes)]
 
 use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters, Memory, BitmapAsset};
 use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT, Chunk};
-use game_state::{Truncate, GAME_WINDOW_HEIGHT, Color};
+use game_state::{Truncate, GAME_WINDOW_HEIGHT, Color, PlayerDirection};
 use game_state::{Game, Result, Error, State, Rng};
 
 /// Type of tiles that inhabit the world
@@ -95,7 +96,15 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
                 let y = u16::try_from(y).unwrap();
 
                 // Get the current tile color
-                let color: Color = (*self.get_tile_at(x, y)).into();
+                let curr_tile = self.get_tile_at(x, y);
+
+                // Don't draw empty tiles
+                if matches!(curr_tile, TileType::Empty) {
+                    continue;
+                }
+
+                // Get the color of the current tile
+                let color: Color = (*curr_tile).into();
 
                 // Get the upper left pixel of the current tile
                 let x = x * TILE_WIDTH;
@@ -161,7 +170,7 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
         self.tile_maps = [std::ptr::null_mut(); PREALLOC_TILE_MAPS];
         self.tile_map_indexes = [None; PREALLOC_TILE_MAPS];
         self.next_tile_map_index = 0;
-        self.step_per_frame = Meters::new(0.1);
+        self.step_per_frame = Meters::new(0.11);
     }
 
     /// Allocate a new [`TileMap`] at chunk id (`x`, `y`)
@@ -311,8 +320,8 @@ pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
 
 /// Actual game logic code that can return a [`Result`]
 fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
-    // Blanket fill the screen with green to ensure all the screen is actually being drawn
-    fill_screen(game, &Color::GREEN);
+    // Draw the background
+    draw_asset(game, game.background, 0., 0.)?;
 
     // Get the world structure which is always at the beginning of the persistent memory
     let world = unsafe {
@@ -322,6 +331,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     let old_player = state.player.position;
     let mut new_player = state.player.position;
+    let mut player_direction = state.player.direction;
 
     for (button_id, is_pressed) in game.buttons.as_ref().iter().enumerate() {
         // Not pressed, ignore the button
@@ -334,16 +344,28 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
         // Based on the button pressed, move the player
         match button {
-            Button::Up    => new_player.tile_rel_y += world.step_per_frame,
-            Button::Down  => new_player.tile_rel_y -= world.step_per_frame,
-            Button::Right => new_player.tile_rel_x += world.step_per_frame,
-            Button::Left  => new_player.tile_rel_x -= world.step_per_frame,
+            Button::Up    => {
+                new_player.tile_rel_y += world.step_per_frame;
+                player_direction = PlayerDirection::Back;
+            }
+            Button::Down  => {
+                new_player.tile_rel_y -= world.step_per_frame;
+                player_direction = PlayerDirection::Front;
+            }
+            Button::Right => {
+                new_player.tile_rel_x += world.step_per_frame;
+                player_direction = PlayerDirection::Right;
+            }
+            Button::Left  => {
+                new_player.tile_rel_x -= world.step_per_frame;
+                player_direction = PlayerDirection::Left;
+            }
             Button::DecreaseSpeed => {
-                world.step_per_frame -= Meters::new(0.05);
+                world.step_per_frame -= Meters::new(0.06);
                 world.step_per_frame = world.step_per_frame.clamp(0.05, 1.0).into();
             }
             Button::IncreaseSpeed => {
-                world.step_per_frame += Meters::new(0.05);
+                world.step_per_frame += Meters::new(0.06);
                 world.step_per_frame = world.step_per_frame.clamp(0.05, 1.0).into();
             }
             Button::Count => {}
@@ -367,19 +389,13 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     let display_lower_left_y = f32::from(GAME_WINDOW_HEIGHT);
 
     let tile_center_x = f32::from(x_offset * TILE_WIDTH + TILE_HALF_WIDTH);
+
     let tile_center_y = display_lower_left_y 
         - f32::from(y_offset * TILE_HEIGHT) 
         - f32::from(TILE_HALF_HEIGHT);
 
-    // Draw the player. 
-    let player_height = f32::from(TILE_HEIGHT) * 0.75; 
-    let player_width  = f32::from(TILE_WIDTH)  * 0.75; 
-
     let player_bottom_center_x = tile_center_x + *new_player.tile_rel_x.into_pixels();
     let player_bottom_center_y = tile_center_y - *new_player.tile_rel_y.into_pixels() ;
-
-    let player_x  = player_bottom_center_x - player_width / 2.;
-    let player_y  = player_bottom_center_y - player_height;
 
     // Check that the potential moved to tile is valid (aka, zero)
     let mut valid = true; 
@@ -401,7 +417,8 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     // If the move is valid, update the player
     if valid { 
-        state.player.position = new_player;
+        state.player.position  = new_player;
+        state.player.direction = player_direction;
     }
 
     // Debug draw the tile the player is currently standing on
@@ -413,6 +430,8 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         dbg!(y_offset * TILE_HEIGHT - TILE_HALF_HEIGHT);
         dbg!(tile_center_x, tile_center_y);
     }
+
+    // DEBUG player position
     draw_rectangle(game, &Color::BLACK, 
         tile_center_x - f32::from(TILE_HALF_WIDTH), 
         tile_center_y - f32::from(TILE_HALF_HEIGHT),
@@ -420,14 +439,25 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     // Draw the player
     // draw_rectangle(game, &Color::GREEN, player_x, player_y, player_width, player_height)?;
-    draw_asset(game, game.asset, player_x, player_y, player_width, player_height)?;
+    
+    // Get the player bitmap for the direction they are currently facing
+    let player_asset = game.player_assets[player_direction as usize];
+
+    // Draw the player
+    draw_asset(game, &player_asset.head,  
+        player_bottom_center_x - player_asset.merge_point_x, 
+        player_bottom_center_y - player_asset.merge_point_y)?;
+    draw_asset(game, &player_asset.torso, 
+        player_bottom_center_x - player_asset.merge_point_x, 
+        player_bottom_center_y - player_asset.merge_point_y)?;
+    draw_asset(game, &player_asset.cape,  
+        player_bottom_center_x - player_asset.merge_point_x, 
+        player_bottom_center_y - player_asset.merge_point_y)?;
 
     draw_rectangle(game, &Color::RED, 
         player_bottom_center_x - 2.0, 
         player_bottom_center_y - 2.0,
         4.0, 4.0)?;
-
-    draw_asset(game, game.asset, 100., 400., 1000., 1000.)?;
 
     Ok(()) 
 }
@@ -444,16 +474,6 @@ fn _test_gradient(game: &mut Game) {
             game.framebuffer[usize::try_from(index).unwrap()] = color;
         }; 
     } 
-}
-
-/// Fill the game display with the given [`Color`]
-fn fill_screen(game: &mut Game, color: &Color) {
-    for col in 0..game.height {
-        for row in 0..game.width {
-            let index = col * game.width + row;
-            game.framebuffer[usize::try_from(index).unwrap()] = color.as_u32();
-        }
-    }
 }
 
 /// Fill a rectangle starting at the pixel (`pos_x`, `pos_y`) with a `width` and `height`
@@ -486,11 +506,17 @@ fn draw_rectangle(game: &mut Game, color: &Color,
     Ok(()) }
 
 /// Draw the given [`BitmapAsset`] at (`pos_x`, `pos_y`) on the screen
-fn draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32, 
-        rect_width: f32, rect_height: f32) -> Result<()> {
-    let width  = std::cmp::min(rect_width.trunc_as_u32(),  asset.width) as f32;
-    let height = std::cmp::min(rect_height.trunc_as_u32(), asset.height) as f32;
+fn draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> Result<()> {
+    let game_height = f32::from(game.height);
+
+    #[allow(clippy::cast_precision_loss)]
+    let width  = asset.width as f32;
+
+    #[allow(clippy::cast_precision_loss)]
+    let height = asset.height as f32;
+
     let bytes_per_color = 4;
+
 
     // Because the BMP pixels are in bottom row -> top row order, if the requested width
     // or height is less than the asset width or height, start the pixels array from the
@@ -509,10 +535,17 @@ fn draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32,
     //                     |
     //                    Normal starting pixel
     let mut starting_height = (asset.height - height.trunc_as_u32()) as usize;
-    if height + pos_y > game.height as f32 {
-        let offscreen = height + pos_y - game.height as f32;
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    if height + pos_y > game_height {
+        let offscreen = height + pos_y - game_height as f32;
         starting_height += offscreen as usize;
     } 
+
+    let mut starting_column = 0; 
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    if pos_x < 0.0 {
+        starting_column = pos_x.round().abs().trunc() as usize;
+    }
 
     let starting_index = starting_height * asset.width as usize * 4;
     let pixels_start = &asset.data[starting_index..];
@@ -532,23 +565,48 @@ fn draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32,
         return Err(Error::InvalidRectangle);
     }
 
+    let blue_index = usize::from(asset.blue_index);
+    let red_index = usize::from(asset.red_index);
+    let green_index = usize::from(asset.green_index);
+    let alpha_index = usize::from(asset.alpha_index);
+
     // Draw the asset at the requested location
     for (row_index, row) in (upper_left_y..lower_right_y).rev().enumerate() {
         // In the event the asset is larger than the requested draw size, update the
         // pixel pointer to the next row of pixels and ignore the non-drawn pixels
         let this_row = row_index * asset.width as usize * bytes_per_color;
-        let mut pixels = &pixels_start[this_row..];
+
+        // In the event the image is off the left edge of the screen, the starting column
+        // should be the remaining portion of the image not NOT from zero.
+        let starting_column = starting_column as usize * bytes_per_color;
+        
+        let mut pixels = &pixels_start[this_row + starting_column..];
 
         for col in upper_left_x..lower_right_x {
-            let b = f32::from(pixels[0]) / 255.0;
-            let g = f32::from(pixels[1]) / 255.0;
-            let r = f32::from(pixels[2]) / 255.0;
-            let a = f32::from(pixels[3]) / 255.0;
-
-            let color = Color::rgba(r, g, b, a);
+            // Sanity check that we have enough pixel data to draw the sprite
+            if pixels.len() < 4 {
+                continue;
+            }
 
             let index = row * u32::from(game.width) + col;
-            game.framebuffer[usize::try_from(index).unwrap()] = color.as_u32();
+            let index = usize::try_from(index).unwrap();
+
+            let r = f32::from(pixels[red_index]) / 255.0;
+            let g = f32::from(pixels[green_index]) / 255.0;
+            let b = f32::from(pixels[blue_index]) / 255.0;
+            let a = f32::from(pixels[alpha_index]) / 255.0;
+
+            // Create the curent color from the bitmap stream
+            let mut new_color = Color::rgba(r, g, b, a);
+
+            // Get the current background color for this pixel
+            let current_color: Color = game.framebuffer[index].into();
+
+            // Blend the new color into the background
+            new_color.linear_alpha_blend(current_color);
+
+            // Write the new color into the backgrouund
+            game.framebuffer[index] = new_color.as_u32();
 
             pixels = &pixels[4..];
         }

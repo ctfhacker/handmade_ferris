@@ -1,5 +1,6 @@
 //! Shared game state information between platforms and game logic
 
+#![feature(asm)]
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(const_fn_fn_ptr_basics)]
 
@@ -105,8 +106,108 @@ pub struct BitmapAsset<'a> {
     /// Height of the bitmap in pixels
     pub height: u32,
 
+    /// The index from 0..4 of the red channel from the pixel streaming data
+    pub red_index: u8,
+
+    /// The index from 0..4 of the blue channel from the pixel streaming data
+    pub blue_index: u8,
+
+    /// The index from 0..4 of the green channel from the pixel streaming data
+    pub green_index: u8,
+
+    /// The index from 0..4 of the alphw channel from the pixel streaming data
+    pub alpha_index: u8,
+
     /// Reference to the pixels
     pub data: &'a [u8],
+}
+
+impl<'a> std::fmt::Debug for BitmapAsset<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BitmapAsset")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("data", &format!("{:p}", &self.data))
+            .finish()
+    }
+}
+
+/// Searches the `val` for the least significant set bit (1 bit).
+fn bit_scan_forward(val: u64) -> Option<u8> {
+    if val == 0 {
+        return None;
+    }
+
+    let mut res: u64;
+    unsafe { 
+        asm!(
+            "bsf {}, {}", 
+            out(reg) res,  
+            in(reg) val,
+        );
+    } 
+    Some(u8::try_from(res).unwrap())
+}
+
+impl<'a> BitmapAsset<'a> {
+    /// Create a [`BitmapAsset`] from the given bytes
+    #[allow(clippy::missing_panics_doc)]
+    pub fn from_data(data: &'a [u8]) -> Self {
+        assert!(data.len() > 0x16 + 4, "BMP data too small");
+
+        let offset = u32::from_le_bytes(data[0x0a..0x0a + 4].try_into().unwrap()) as usize;
+        let width  = u32::from_le_bytes(data[0x12..0x12 + 4].try_into().unwrap());
+        let height = u32::from_le_bytes(data[0x16..0x16 + 4].try_into().unwrap());
+        let r_mask = u32::from_le_bytes(data[0x36..0x36 + 4].try_into().unwrap());
+        let g_mask = u32::from_le_bytes(data[0x3a..0x3a + 4].try_into().unwrap());
+        let b_mask = u32::from_le_bytes(data[0x3e..0x3e + 4].try_into().unwrap());
+        let a_mask = u32::from_le_bytes(data[0x42..0x42 + 4].try_into().unwrap());
+
+        // Get the index value for the color channels specific for this image
+        let red_index   = bit_scan_forward(r_mask.into()).expect("Empty red mask?")   / 8;
+        let green_index = bit_scan_forward(g_mask.into()).expect("Empty green mask?") / 8;
+        let blue_index  = bit_scan_forward(b_mask.into()).expect("Empty blue mask?")  / 8;
+        let alpha_index = bit_scan_forward(a_mask.into()).expect("Empty alpha mask?") / 8;
+
+        BitmapAsset { 
+            width, height, 
+            red_index, 
+            green_index, 
+            blue_index, 
+            alpha_index, 
+            data: &data[offset..] 
+        }
+    }
+}
+
+/// Bitmap assets for the player
+#[derive(Debug)]
+pub struct PlayerBitmap<'a> {
+    /// [`BitmapAsset`] of the head of the player
+    pub head:  BitmapAsset<'a>,
+
+    /// [`BitmapAsset`] of the torso of the player
+    pub torso: BitmapAsset<'a>,
+
+    /// [`BitmapAsset`] of the cape of the player
+    pub cape:  BitmapAsset<'a>,
+
+    /// The x coordinate of the merge point from the upper left corner of the image
+    pub merge_point_x: f32,
+
+    /// The x coordinate of the merge point from the upper left corner of the image
+    pub merge_point_y: f32,
+}
+
+impl<'a> PlayerBitmap<'a> {
+    /// Create a [`PlayerBitmap`] from the given assets
+    pub fn from(head: BitmapAsset<'a>, torso: BitmapAsset<'a>,
+            cape: BitmapAsset<'a>, merge_point_x: f32, merge_point_y: f32) -> Self {
+
+        Self {
+            head, torso, cape, merge_point_x, merge_point_y
+        }
+    }
 }
 
 /// Game/Memory state
@@ -129,8 +230,11 @@ pub struct Game<'a>  {
     /// Reference to the memory backing the game
     pub memory: &'a mut Memory,
 
-    /// Some offset to try and draw (width 
-    pub asset: &'a BitmapAsset<'a>
+    /// Player assets specific to the direction the player is facing
+    pub player_assets: [&'a PlayerBitmap<'a>; PlayerDirection::COUNT as usize],
+
+    /// Background asset
+    pub background: &'a BitmapAsset<'a>
 }
 
 impl From<f32> for Meters {
@@ -238,7 +342,10 @@ impl PixelsPerMeter {
 #[derive(Debug)]
 pub struct Player {
     /// World position of the player
-    pub position: WorldPosition
+    pub position: WorldPosition,
+
+    /// Direction the player is facing
+    pub direction: PlayerDirection
 }
 
 /// Game state
@@ -262,11 +369,13 @@ impl State {
                     z: 0,
                     tile_rel_x: Meters::new(0.0),
                     tile_rel_y: Meters::new(0.0),
-                }
-            },
-            rng: Rng::new()
-        }
+                },
 
+                direction: PlayerDirection::Front
+            },
+
+            rng: Rng::new(),
+        }
     }
 }
 
@@ -574,7 +683,7 @@ impl Memory {
 
 
 /// Color represented by red, green, blue pigments with alpha channel
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Color {
     /// Percentage of red color pigment from 0.0 .. 1.0
     red: Red,
@@ -603,7 +712,7 @@ impl From<u8> for Color {
 /// Creates the bounded color values to percentages of [0.0..1.0]
 macro_rules! make_color { ($color:ident) => {
         /// Red color bounded to the percentage of 0.0 to 1.0
-        #[derive(Debug)]
+        #[derive(Debug, Copy, Clone)]
         struct $color(f32);
 
         impl $color {
@@ -621,6 +730,13 @@ macro_rules! make_color { ($color:ident) => {
 
             fn deref(&self) -> &Self::Target {
                 &self.0
+            }
+        }
+
+
+        impl std::ops::DerefMut for $color {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
             }
         }
     }
@@ -703,4 +819,47 @@ impl Color {
         (*self.green * 255.).trunc_as_u32() <<  8 |
         (*self.blue  * 255.).trunc_as_u32()
     }
+
+    /// Linear blend the (red, green, and blue) channels with the `background` [`Color`]
+    pub fn linear_alpha_blend(&mut self, background: Color) {
+        let alpha = self.alpha.0;
+
+        self.red.0   = alpha * self.red.0   + background.red.0   * (1.0 - alpha);
+        self.blue.0  = alpha * self.blue.0  + background.blue.0  * (1.0 - alpha);
+        self.green.0 = alpha * self.green.0 + background.green.0 * (1.0 - alpha);
+    }
+}
+
+
+impl From<u32> for Color {
+    #[allow(clippy::cast_possible_truncation)]
+    fn from(val: u32) -> Color {
+        let alpha = Alpha::new(f32::from((val >> 24) as u8) / 255.0);
+        let red   = Red::new(f32::from((val >> 16) as u8) / 255.0);
+        let green = Green::new(f32::from((val >>  8) as u8) / 255.0);
+        let blue  = Blue::new(f32::from(val as u8) / 255.0);
+
+        Color {
+            red, green, blue, alpha
+        }
+    }
+}
+
+/// The direction the player is currently facing
+#[derive(Debug, Copy, Clone)]
+pub enum PlayerDirection {
+    /// Player is facing front
+    Front,
+
+    /// Player is facing back
+    Back,
+
+    /// Player is facing left
+    Left,
+
+    /// Player is facing right
+    Right,
+
+    /// Number of elements in this enum
+    COUNT
 }

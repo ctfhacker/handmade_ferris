@@ -4,6 +4,8 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(const_fn_fn_ptr_basics)]
 
+use std::ops::AddAssign;
+
 mod rng;
 pub use rng::Rng;
 
@@ -402,6 +404,28 @@ impl std::ops::SubAssign for Meters {
     }
 }
 
+impl std::ops::MulAssign<f32> for Meters {
+    fn mul_assign(&mut self, other: f32) {
+        self.0 *= other;
+    }
+}
+
+impl std::ops::MulAssign for Meters {
+    fn mul_assign(&mut self, other: Self) {
+        let other: f32 = *other;
+
+        self.0 *= other;
+    }
+}
+
+impl std::ops::Add<Meters> for Meters {
+    type Output = Self;
+    fn add(self, rhs: Meters) -> Self::Output {
+        Meters(self.0 + rhs.0)
+    }
+}
+
+
 impl std::ops::Sub<f32> for Meters {
     type Output = Self;
     fn sub(self, rhs: f32) -> Self::Output {
@@ -412,6 +436,13 @@ impl std::ops::Sub<f32> for Meters {
 impl std::ops::SubAssign<f32> for Meters {
     fn sub_assign(&mut self, rhs: f32) {
         self.0 -= rhs;
+    }
+}
+
+impl std::ops::Mul<Meters> for Meters {
+    type Output = Self;
+    fn mul(self, rhs: Meters) -> Self::Output {
+        Meters(self.0 * rhs.0)
     }
 }
 
@@ -659,6 +690,12 @@ pub struct WorldPosition {
     pub tile_rel: Vector2<Meters>
 }
 
+impl AddAssign<Vector2<Meters>> for WorldPosition {
+    fn add_assign(&mut self, right: Vector2<Meters>) {
+        self.tile_rel += right;
+    }
+}
+
 impl WorldPosition {
     /// Update the tile position if the relative tile position moved to an adjacent tile
     ///
@@ -689,7 +726,7 @@ impl WorldPosition {
         }
     }
 
-    /// Return the [
+    /// Return the `Vector2` of the (x, y) chunk coordinates
     pub fn into_chunk(&self) -> ChunkVector {
         let Chunk { chunk_id: chunk_id_x, offset: x_offset } = self.tile_map_x.into_chunk();
         let Chunk { chunk_id: chunk_id_y, offset: y_offset } = self.tile_map_y.into_chunk();

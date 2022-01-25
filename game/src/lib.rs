@@ -337,6 +337,8 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     let old_player = state.player.position;
     let mut new_player = state.player.position;
 
+    let mut movement_delta = Vector2::new(Meters::new(0.), Meters::new(0.));
+
     for (button_id, is_pressed) in game.buttons.as_ref().iter().enumerate() {
         // Not pressed, ignore the button
         if !is_pressed {
@@ -349,19 +351,23 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         // Based on the button pressed, move the player
         match button {
             Button::Up    => {
-                new_player.tile_rel.y += world.step_per_frame;
+                movement_delta.y += world.step_per_frame;
+                // new_player.tile_rel.y += ;
                 state.player.direction = PlayerDirection::Back;
             }
             Button::Down  => {
-                new_player.tile_rel.y -= world.step_per_frame;
+                // new_player.tile_rel.y -= world.step_per_frame;
+                movement_delta.y -= world.step_per_frame;
                 state.player.direction = PlayerDirection::Front;
             }
             Button::Right => {
-                new_player.tile_rel.x += world.step_per_frame;
+                // new_player.tile_rel.x += world.step_per_frame;
+                movement_delta.x += world.step_per_frame;
                 state.player.direction = PlayerDirection::Right;
             }
             Button::Left  => {
-                new_player.tile_rel.x -= world.step_per_frame;
+                // new_player.tile_rel.x -= world.step_per_frame;
+                movement_delta.x -= world.step_per_frame;
                 state.player.direction = PlayerDirection::Left;
             }
             Button::DecreaseSpeed => {
@@ -375,6 +381,14 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
             Button::Count => {}
         }
     }
+
+    if movement_delta.x != Meters::new(0.0) && movement_delta.y != Meters::new(0.0) {
+        // 1/sqrt(2)
+        let one_div_sqrt_2 = std::f32::consts::FRAC_1_SQRT_2;
+        movement_delta *= Meters::new(one_div_sqrt_2);
+    }
+
+    new_player += movement_delta;
 
     // Update the player coordinates based on the movement. If the player has stepped
     // beyond the bounds of the current tile, update the position to the new tile.

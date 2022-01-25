@@ -6,7 +6,7 @@
 #![feature(stmt_expr_attributes)]
 
 use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters, Memory, BitmapAsset};
-use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT, Chunk};
+use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT};
 use game_state::{Truncate, GAME_WINDOW_HEIGHT, Color, PlayerDirection};
 use game_state::{Game, Result, Error, State, Rng, ChunkVector};
 
@@ -336,7 +336,6 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     let old_player = state.player.position;
     let mut new_player = state.player.position;
-    let mut player_direction = state.player.direction;
 
     for (button_id, is_pressed) in game.buttons.as_ref().iter().enumerate() {
         // Not pressed, ignore the button

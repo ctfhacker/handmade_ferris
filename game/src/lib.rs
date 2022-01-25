@@ -8,7 +8,9 @@
 use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters, Memory, BitmapAsset};
 use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT, Chunk};
 use game_state::{Truncate, GAME_WINDOW_HEIGHT, Color, PlayerDirection};
-use game_state::{Game, Result, Error, State, Rng};
+use game_state::{Game, Result, Error, State, Rng, ChunkVector};
+
+use vector::Vector2;
 
 /// Type of tiles that inhabit the world
 #[derive(Debug, Copy, Clone)]
@@ -69,15 +71,15 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Requested (x, y) is outside the bounds of the [`TileMap`]
-    pub fn get_tile_at(&self, x: u16, y: u16) -> &TileType {
+    pub fn get_tile_at(&self, pos: Vector2<u16>) -> &TileType {
         // Convert the coords to be standard coords
         // ^ |
         // | |
         // y0|
         //   +-----
         //    x0->
-        let x = usize::from(x);
-        let y = HEIGHT - 1 - usize::from(y);
+        let x = usize::from(pos.x);
+        let y = HEIGHT - 1 - usize::from(pos.y);
         assert!(x < WIDTH,  "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
         assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
 
@@ -92,11 +94,10 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
 
         for y in 0..HEIGHT {
             for x in 0..WIDTH {
-                let x = u16::try_from(x).unwrap();
-                let y = u16::try_from(y).unwrap();
+                let tile_pos = Vector2::new(x, y).into();
 
                 // Get the current tile color
-                let curr_tile = self.get_tile_at(x, y);
+                let curr_tile = self.get_tile_at(tile_pos);
 
                 // Don't draw empty tiles
                 if matches!(curr_tile, TileType::Empty) {
@@ -106,15 +107,20 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
                 // Get the color of the current tile
                 let color: Color = (*curr_tile).into();
 
+                let pixel_pos = Vector2::new(
+                    tile_pos.x * TILE_WIDTH,
+                    tile_pos.y * TILE_HEIGHT,
+                );
+
                 // Get the upper left pixel of the current tile
-                let x = x * TILE_WIDTH;
-                let y = y * TILE_HEIGHT;
+                let pixel_pos = Vector2::new(
+                    f32::from(pixel_pos.x),
+                    display_lower_left_y - f32::from(pixel_pos.y)
+                );
 
                 // Draw the tile
-                draw_rectangle(game, &color, f32::from(x), 
-                    display_lower_left_y - f32::from(y), 
-                    f32::from(TILE_WIDTH), f32::from(TILE_HEIGHT)
-                )?;
+                draw_rectangle(game, &color, pixel_pos,
+                    f32::from(TILE_WIDTH), f32::from(TILE_HEIGHT))?;
             }
         }
 
@@ -138,8 +144,6 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
         assert!(x < WIDTH,  "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
         assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
 
-
-
         unsafe {
             let ptr = self.data.get_unchecked_mut(y).get_unchecked_mut(x);
             (*ptr) = val;
@@ -155,7 +159,7 @@ pub struct World<const WIDTH: usize, const HEIGHT: usize> {
 
     /// (x, y, z) tile_map pairing which index corresponds to the index in `tile_maps`
     /// containg the pointer to the `tile_map`
-    tile_map_indexes: [Option<(u32, u32, u8)>; PREALLOC_TILE_MAPS],
+    tile_map_indexes: [Option<(Vector2<u32>, u8)>; PREALLOC_TILE_MAPS],
 
     /// Index to the next tile_map slot
     next_tile_map_index: usize,
@@ -178,11 +182,11 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Out of slots to hold tile maps
-    pub fn alloc_tilemap_at(&mut self, memory: &mut Memory, x: u32, y: u32, z: u8) 
+    pub fn alloc_tilemap_at(&mut self, memory: &mut Memory, pos: Vector2<u32>, z: u8) 
             -> &mut TileMap<WIDTH, HEIGHT>  {
         assert!(self.next_tile_map_index < PREALLOC_TILE_MAPS, "Out of tile map slot");
 
-        println!("Allocating tile map at ({}, {}, {})", x, y, z);
+        println!("Allocating tile map at ({:?}, {})", pos, z);
 
         let curr_tile_index = self.next_tile_map_index;
 
@@ -190,7 +194,7 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
         let tile_map: *mut TileMap<WIDTH, HEIGHT> = memory.alloc();
 
         // Set the tile map index for this newly allocated tilemap
-        self.tile_map_indexes[curr_tile_index] = Some((x, y, z));
+        self.tile_map_indexes[curr_tile_index] = Some((pos, z));
         self.tile_maps[curr_tile_index] = tile_map;
 
         // Bump the tile map index
@@ -207,32 +211,33 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Sanity check of indexes is out of sync
-    pub fn get_tilemap_at(&mut self, x: u32, y: u32, z: u8, memory: &mut Memory, 
+    pub fn get_tilemap_at(&mut self, pos: Vector2<u32>, z: u8, memory: &mut Memory, 
             rng: &mut Rng) -> &mut TileMap<WIDTH, HEIGHT> {
         // Look for the requested (x, y) in the allocated tile maps and return the
         // pointer if found
         for (index, coord) in self.tile_map_indexes[..self.next_tile_map_index].iter().enumerate() {
             assert!(coord.is_some(), "next_tile_map_index out of sync");
 
-            if coord.unwrap() == (x, y, z) {
+            if coord.unwrap() == (pos, z) {
                 return unsafe { &mut *self.tile_maps[index] };
             }
         }
 
         // Allocate and initialize a new tile map
-        self.init_tile_map(x, y, z, memory, rng)
+        self.init_tile_map(pos, z, memory, rng)
     }
 
     /// Randomly initialize a tile map
     #[allow(clippy::cast_possible_truncation)]
     fn init_tile_map(&mut self, 
-            chunk_x: u32, chunk_y: u32, z: u8, memory: &mut Memory, rng: &mut Rng) ->
+            chunk: Vector2<u32>,
+            z: u8, memory: &mut Memory, rng: &mut Rng) ->
             &mut TileMap<WIDTH, HEIGHT> {
         // If a ladder is drawn, write the ladder in the adjacent floor location
         let mut other_floor = None;
 
         // No tilemap was found, allocate a new one
-        let tile_map = self.alloc_tilemap_at(memory, chunk_x, chunk_y, z);
+        let tile_map = self.alloc_tilemap_at(memory, chunk, z);
 
         let mut ladder_set = false;
 
@@ -282,11 +287,11 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
         // Get the same corresponding ladder on the other floor
         if let Some((x, y)) = other_floor {
             let other_z = (z + 1) % 2;
-            let other_tilemap = self.get_tilemap_at(chunk_x, chunk_y, other_z, memory, rng);
+            let other_tilemap = self.get_tilemap_at(chunk, other_z, memory, rng);
             other_tilemap.set_tile_at(x, y, TileType::Ladder);
         }
 
-        self.get_tilemap_at(chunk_x, chunk_y, z, memory, rng)
+        self.get_tilemap_at(chunk, z, memory, rng)
     }
 }
 
@@ -321,7 +326,7 @@ pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
 /// Actual game logic code that can return a [`Result`]
 fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Draw the background
-    draw_asset(game, game.background, 0., 0.)?;
+    game.background.draw(game, Vector2::new(0., 0.));
 
     // Get the world structure which is always at the beginning of the persistent memory
     let world = unsafe {
@@ -345,20 +350,20 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         // Based on the button pressed, move the player
         match button {
             Button::Up    => {
-                new_player.tile_rel_y += world.step_per_frame;
-                player_direction = PlayerDirection::Back;
+                new_player.tile_rel.y += world.step_per_frame;
+                state.player.direction = PlayerDirection::Back;
             }
             Button::Down  => {
-                new_player.tile_rel_y -= world.step_per_frame;
-                player_direction = PlayerDirection::Front;
+                new_player.tile_rel.y -= world.step_per_frame;
+                state.player.direction = PlayerDirection::Front;
             }
             Button::Right => {
-                new_player.tile_rel_x += world.step_per_frame;
-                player_direction = PlayerDirection::Right;
+                new_player.tile_rel.x += world.step_per_frame;
+                state.player.direction = PlayerDirection::Right;
             }
             Button::Left  => {
-                new_player.tile_rel_x -= world.step_per_frame;
-                player_direction = PlayerDirection::Left;
+                new_player.tile_rel.x -= world.step_per_frame;
+                state.player.direction = PlayerDirection::Left;
             }
             Button::DecreaseSpeed => {
                 world.step_per_frame -= Meters::new(0.06);
@@ -377,10 +382,9 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     new_player.canonicalize();
     // dbg_hex!(new_player);
 
-    let Chunk { chunk_id: tile_map_x, offset: x_offset } = new_player.x.into_chunk();
-    let Chunk { chunk_id: tile_map_y, offset: y_offset } = new_player.y.into_chunk();
+    let ChunkVector { chunk_id, offset } = new_player.into_chunk();
 
-    let tile_map = world.get_tilemap_at(tile_map_x, tile_map_y, new_player.z,
+    let tile_map = world.get_tilemap_at(chunk_id, new_player.z,
         game.memory, &mut state.rng);
 
     // Draw the tile map
@@ -388,20 +392,21 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     let display_lower_left_y = f32::from(GAME_WINDOW_HEIGHT);
 
-    let mut tile_center_x = f32::from(x_offset * TILE_WIDTH + TILE_HALF_WIDTH);
+    let mut tile_center = Vector2::new(
+        f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH),
+        display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT)
+    );
 
-    let mut tile_center_y = display_lower_left_y 
-        - f32::from(y_offset * TILE_HEIGHT) 
-        - f32::from(TILE_HALF_HEIGHT);
-
-    let mut player_bottom_center_x = tile_center_x + *new_player.tile_rel_x.into_pixels();
-    let mut player_bottom_center_y = tile_center_y - *new_player.tile_rel_y.into_pixels() ;
+    let mut player_bottom_center = Vector2::new(
+        tile_center.x + *new_player.tile_rel.x.into_pixels(),
+        tile_center.y - *new_player.tile_rel.y.into_pixels() 
+    );
 
     // Check that the potential moved to tile is valid (aka, zero)
     let mut valid = true; 
 
     // Handle the tile type
-    let next_tile = tile_map.get_tile_at(x_offset, y_offset);
+    let next_tile = tile_map.get_tile_at(offset);
 
     // Block movement to walls
     if matches!(next_tile, &TileType::Wall) {
@@ -410,64 +415,51 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     // Only go up/down a ladder if the player didn't originally come from a ladder
     if matches!(next_tile, &TileType::Ladder) 
-            && ((new_player.x != old_player.x) || (new_player.y != old_player.y)) {
+        && (new_player.tile_map_x != old_player.tile_map_x 
+                || new_player.tile_map_y != old_player.tile_map_y) {
         new_player.z = (new_player.z + 1) % 2;
     }
 
     // If the move is valid, update the player
     if valid { 
         state.player.position  = new_player;
-        state.player.direction = player_direction;
     } else {
         // Reset the coordinates for places where the player cannot move
-        let Chunk { chunk_id: _, offset: x_offset } = old_player.x.into_chunk();
-        let Chunk { chunk_id: _, offset: y_offset } = old_player.y.into_chunk();
-        tile_center_x = f32::from(x_offset * TILE_WIDTH + TILE_HALF_WIDTH);
-        tile_center_y = display_lower_left_y 
-            - f32::from(y_offset * TILE_HEIGHT) 
+        let ChunkVector { chunk_id: _, offset } = old_player.into_chunk();
+
+        tile_center.x = f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH);
+        tile_center.y = display_lower_left_y 
+            - f32::from(offset.y * TILE_HEIGHT) 
             - f32::from(TILE_HALF_HEIGHT);
 
-        player_bottom_center_x = tile_center_x + *old_player.tile_rel_x.into_pixels();
-        player_bottom_center_y = tile_center_y - *old_player.tile_rel_y.into_pixels() ;
+
+        let old_tile_rel: Vector2<f32> = Vector2::new(
+            *old_player.tile_rel.x,
+            *old_player.tile_rel.y,
+        );
+
+        player_bottom_center = tile_center - old_tile_rel;
     }
 
-    // Debug draw the tile the player is currently standing on
-    if tile_center_y < 0.0 {
-        dbg!(display_lower_left_y);
-        dbg!(y_offset);
-        dbg!(y_offset * TILE_HEIGHT);
-        dbg!(TILE_HALF_HEIGHT);
-        dbg!(y_offset * TILE_HEIGHT - TILE_HALF_HEIGHT);
-        dbg!(tile_center_x, tile_center_y);
-    }
+    let tile_half = Vector2::new(
+        f32::from(TILE_HALF_WIDTH), 
+        f32::from(TILE_HALF_HEIGHT)
+    );
 
     // DEBUG player position
-    draw_rectangle(game, &Color::BLACK, 
-        tile_center_x - f32::from(TILE_HALF_WIDTH), 
-        tile_center_y - f32::from(TILE_HALF_HEIGHT),
+    draw_rectangle(game, &Color::BLACK, tile_center - tile_half,
         f32::from(TILE_WIDTH), f32::from(TILE_HEIGHT))?;
 
-    // Draw the player
-    // draw_rectangle(game, &Color::GREEN, player_x, player_y, player_width, player_height)?;
-    
     // Get the player bitmap for the direction they are currently facing
-    let player_asset = game.player_assets[player_direction as usize];
+    let player_asset = game.player_assets[state.player.direction as usize];
 
-    // Draw the player
-    draw_asset(game, &player_asset.head,  
-        player_bottom_center_x - player_asset.merge_point_x, 
-        player_bottom_center_y - player_asset.merge_point_y)?;
-    draw_asset(game, &player_asset.torso, 
-        player_bottom_center_x - player_asset.merge_point_x, 
-        player_bottom_center_y - player_asset.merge_point_y)?;
-    draw_asset(game, &player_asset.cape,  
-        player_bottom_center_x - player_asset.merge_point_x, 
-        player_bottom_center_y - player_asset.merge_point_y)?;
+    let position = player_bottom_center - player_asset.merge_point;
+    player_asset.head.draw(game, position);
+    player_asset.torso.draw(game, position);
+    player_asset.cape.draw(game, position);
 
-    draw_rectangle(game, &Color::RED, 
-        player_bottom_center_x - 2.0, 
-        player_bottom_center_y - 2.0,
-        4.0, 4.0)?;
+    // DEBUG draw the player bottom center
+    draw_rectangle(game, &Color::RED, player_bottom_center - 2.0, 4.0, 4.0)?;
 
     Ok(()) 
 }
@@ -487,12 +479,12 @@ fn _test_gradient(game: &mut Game) {
 }
 
 /// Fill a rectangle starting at the pixel (`pos_x`, `pos_y`) with a `width` and `height`
-fn draw_rectangle(game: &mut Game, color: &Color, 
-        pos_x: f32, pos_y: f32, width: f32, height: f32) -> Result<()> {
-    let upper_left_x  = pos_x;
-    let upper_left_y  = pos_y;
-    let lower_right_x = pos_x + width;
-    let lower_right_y = pos_y + height;
+fn draw_rectangle(game: &mut Game, color: &Color, pos: Vector2<f32>, 
+        width: f32, height: f32) -> Result<()> {
+    let upper_left_x  = pos.x;
+    let upper_left_y  = pos.y;
+    let lower_right_x = pos.x + width;
+    let lower_right_y = pos.y + height;
 
     let upper_left_x   = upper_left_x.trunc_as_u32().clamp(0,  u32::from(game.width));
     let lower_right_x  = lower_right_x.trunc_as_u32().clamp(0, u32::from(game.width));
@@ -516,7 +508,7 @@ fn draw_rectangle(game: &mut Game, color: &Color,
     Ok(()) }
 
 /// Draw the given [`BitmapAsset`] at (`pos_x`, `pos_y`) on the screen
-fn draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> Result<()> {
+fn _draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> Result<()> {
     let game_height = f32::from(game.height);
 
     #[allow(clippy::cast_precision_loss)]

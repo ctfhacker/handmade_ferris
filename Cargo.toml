@@ -1,2 +1,2 @@
 [workspace]
-members = ["game", "game_state", "linux_platform"]
+members = ["game", "game_state", "linux_platform", "vector"]

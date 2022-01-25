@@ -1,13 +1,8 @@
 [package]
-name = "game"
+name = "vector"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-game_state = { path = "../game_state" }
-vector     = { path = "../vector" }
-
-[lib]
-crate-type = ["cdylib"]

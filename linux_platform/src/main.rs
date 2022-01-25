@@ -6,6 +6,8 @@ mod dl;
 use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game, Button, Memory, BitmapAsset};
 use game_state::{PlayerBitmap, PlayerDirection};
 
+use vector::Vector2;
+
 /// Target FPS for the game
 const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
 
@@ -29,8 +31,8 @@ macro_rules! load_asset {
             BitmapAsset::from_data(&head),
             BitmapAsset::from_data(&torso),
             BitmapAsset::from_data(&cape),
-            73.0,
-            174.0);
+            Vector2::new(73.0, 174.0)
+        );
     }
 }
 

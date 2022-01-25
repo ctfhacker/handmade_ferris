@@ -7,3 +7,4 @@ edition = "2021"
 [dependencies]
 x11-rs     = { path = "./x11-rs" }
 game_state = { path = "../game_state" }
+vector     = { path = "../vector" }

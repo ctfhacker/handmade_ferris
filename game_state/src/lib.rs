@@ -7,6 +7,8 @@
 mod rng;
 pub use rng::Rng;
 
+use vector::Vector2;
+
 /// Number of COLUMNS in the tile map
 pub const TILE_MAP_COLUMNS: usize = 16;
 
@@ -138,6 +140,119 @@ impl<'a> std::fmt::Debug for BitmapAsset<'a> {
     }
 }
 
+impl<'a> BitmapAsset<'a> {
+    /// Draw this bitmap at (`pos_x`, `pos_y`) on the screen
+    /// 
+    /// # Panics
+    ///
+    /// * 
+    pub fn draw(&self, game: &mut Game, pos: Vector2<f32>) {
+        let game_height = f32::from(game.height);
+
+        #[allow(clippy::cast_precision_loss)]
+        let width  = self.width as f32;
+
+        #[allow(clippy::cast_precision_loss)]
+        let height = self.height as f32;
+
+        let bytes_per_color = 4;
+
+        // Because the BMP pixels are in bottom row -> top row order, if the requested width
+        // or height is less than the self width or height, start the pixels array from the
+        // correct location. 
+        //
+        //                    +----------------------------+
+        //                    | Draw  |    BMP self       |
+        //                    |       |                    |
+        // Requested start  -->*      |                    |
+        //                    +-------+                    |
+        //                    |                            |
+        //                    |                            |
+        //                    |                            |
+        //                    |*                           |
+        //                    +^---------------------------+
+        //                     |
+        //                    Normal starting pixel
+        let mut starting_height = (self.height - height.trunc_as_u32()) as usize;
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        if height + pos.y > game_height {
+            let offscreen = height + pos.y - game_height as f32;
+            starting_height += offscreen as usize;
+        } 
+
+        let mut starting_column = 0; 
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        if pos.x < 0.0 {
+            starting_column = pos.x.round().abs().trunc() as usize;
+        }
+
+        let starting_index = starting_height * self.width as usize * 4;
+        let pixels_start = &self.data[starting_index..];
+
+        let upper_left  = Vector2::new(
+            pos.x.trunc_as_u32().clamp(0, u32::from(game.width)),
+            pos.y.trunc_as_u32().clamp(0, u32::from(game.height)),
+        );
+
+        let lower_right = Vector2::new(
+            (pos.x + width).trunc_as_u32().clamp(0, u32::from(game.width)),
+            (pos.y + height).trunc_as_u32().clamp(0, u32::from(game.height))
+        );
+
+        // Get the color channel indexes for each color
+        let blue_index  = usize::from(self.blue_index);
+        let red_index   = usize::from(self.red_index);
+        let green_index = usize::from(self.green_index);
+        let alpha_index = usize::from(self.alpha_index);
+
+        // Draw the self at the requested location
+        for (row_index, row) in (upper_left.y..lower_right.y).rev().enumerate() {
+            // In the event the self is larger than the requested draw size, update the
+            // pixel pointer to the next row of pixels and ignore the non-drawn pixels
+            let this_row = row_index * self.width as usize * bytes_per_color;
+
+            // In the event the image is off the left edge of the screen, the starting column
+            // should be the remaining portion of the image not NOT from zero.
+            let starting_column = starting_column as usize * bytes_per_color;
+            
+            let mut pixels = &pixels_start[this_row + starting_column..];
+
+            for col in upper_left.x..lower_right.x {
+                // Sanity check that we have enough pixel data to draw the sprite
+                if pixels.len() < 4 {
+                    continue;
+                }
+
+                let index = row.checked_mul(u32::from(game.width))
+                               .and_then(|res| res.checked_add(col))
+                               .expect("Overflow");
+
+                let index = usize::try_from(index).unwrap();
+
+                let r = f32::from(pixels[red_index]) / 255.0;
+                let g = f32::from(pixels[green_index]) / 255.0;
+                let b = f32::from(pixels[blue_index]) / 255.0;
+                let a = f32::from(pixels[alpha_index]) / 255.0;
+
+                // Create the curent color from the bitmap stream
+                let mut new_color = Color::rgba(r, g, b, a);
+
+                // Get the current background color for this pixel
+                let current_color: Color = game.framebuffer[index].into();
+
+                // Blend the new color into the background
+                new_color.linear_alpha_blend(current_color);
+
+                // Write the new color into the backgrouund
+                game.framebuffer[index] = new_color.as_u32();
+
+                pixels = &pixels[4..];
+            }
+
+        }
+    }
+}
+
 /// Searches the `val` for the least significant set bit (1 bit).
 fn bit_scan_forward(val: u64) -> Option<u8> {
     if val == 0 {
@@ -198,20 +313,17 @@ pub struct PlayerBitmap<'a> {
     /// [`BitmapAsset`] of the cape of the player
     pub cape:  BitmapAsset<'a>,
 
-    /// The x coordinate of the merge point from the upper left corner of the image
-    pub merge_point_x: f32,
-
-    /// The x coordinate of the merge point from the upper left corner of the image
-    pub merge_point_y: f32,
+    /// The coordinate of the merge point from the upper left corner of the image
+    pub merge_point: Vector2<f32>,
 }
 
 impl<'a> PlayerBitmap<'a> {
     /// Create a [`PlayerBitmap`] from the given assets
     pub fn from(head: BitmapAsset<'a>, torso: BitmapAsset<'a>,
-            cape: BitmapAsset<'a>, merge_point_x: f32, merge_point_y: f32) -> Self {
+            cape: BitmapAsset<'a>, merge_point: Vector2<f32>) -> Self {
 
         Self {
-            head, torso, cape, merge_point_x, merge_point_y
+            head, torso, cape, merge_point
         }
     }
 }
@@ -303,6 +415,12 @@ impl std::ops::SubAssign<f32> for Meters {
     }
 }
 
+impl From<Meters> for f32 {
+    fn from(val: Meters) -> f32 {
+        *val
+    }
+}
+
 /// Typed `f32` representing number of pixels
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
@@ -377,23 +495,27 @@ impl State {
         Self {
             player: Player {
                 position: WorldPosition {
-                    x: AbsoluteTile::from_chunk_offset(0, 5),
-                    y: AbsoluteTile::from_chunk_offset(0, 6),
+                    tile_map_x: AbsoluteTile::from_chunk_offset(0, 5),
+                    tile_map_y: AbsoluteTile::from_chunk_offset(0, 6),
                     z: 0,
-                    tile_rel_x: Meters::new(0.0),
-                    tile_rel_y: Meters::new(0.0),
+                    tile_rel: Vector2::new(
+                        Meters::new(0.0),
+                        Meters::new(0.0),
+                    )
                 },
 
                 direction: PlayerDirection::Front
             },
             camera: WorldPosition {
-                    x: AbsoluteTile::from_chunk_offset(0, 
+                tile_map_x: AbsoluteTile::from_chunk_offset(0, 
                         SCREEN_CENTER_COLUMN.try_into().unwrap()),
-                    y: AbsoluteTile::from_chunk_offset(0, 
+                tile_map_y: AbsoluteTile::from_chunk_offset(0, 
                         SCREEN_CENTER_ROW.try_into().unwrap()),
-                    z: 0,
-                    tile_rel_x: Meters::new(0.0),
-                    tile_rel_y: Meters::new(0.0),
+                z: 0,
+                tile_rel: Vector2::new(
+                    Meters::new(0.0),
+                    Meters::new(0.0),
+                )
             },
             rng: Rng::new(),
         }
@@ -410,8 +532,18 @@ pub struct Chunk {
     pub offset: u16
 }
 
+/// [`Chunk`] with `chunk_id` and `offset` as `Vector2`
+pub struct ChunkVector {
+    /// ID of the chunk
+    pub chunk_id: Vector2<u32>,
+
+    /// Offset into the chunk
+    pub offset: Vector2<u16>
+}
+
 /// An absolute tile location in the world, constrained to only be [`0`, `MAX`) in value.
 #[derive(Copy, Clone, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct AbsoluteTile<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>(u32);
 
 impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> std::fmt::Debug 
@@ -512,22 +644,19 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk>
 ///
 /// The [`AbsoluteTile`] contains the `chunk` and specific tile in the chunk itself, while 
 /// the `tile_rel_*` contains the relative offset the entity is within 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct WorldPosition {
-    /// The absolute tile value in x
-    pub x: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_COLUMNS>,
+    /// The x coordinate in the world
+    pub tile_map_x: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_COLUMNS>,
 
-    /// The absolute tile value in y
-    pub y: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_ROWS>,
+    /// The y coordinate in the world
+    pub tile_map_y: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_ROWS>,
 
     /// The floor height in z
     pub z: u8,
 
-    /// x offset in the tile
-    pub tile_rel_x: Meters,
-
-    /// y offset in the tile
-    pub tile_rel_y: Meters,
+    /// The relative position in a given tile
+    pub tile_rel: Vector2<Meters>
 }
 
 impl WorldPosition {
@@ -538,24 +667,37 @@ impl WorldPosition {
     /// * Fails to pass sanity check for the relative tile position
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn canonicalize(&mut self) {
-        assert!(self.tile_rel_x >= Meters::const_new(-1.5) && self.tile_rel_x <= Meters::const_new(1.5));
-        assert!(self.tile_rel_y >= Meters::const_new(-1.5) && self.tile_rel_y <= Meters::const_new(1.5));
+        assert!(self.tile_rel.x >= Meters::const_new(-1.5) 
+            && self.tile_rel.x <= Meters::const_new(1.5));
+        assert!(self.tile_rel.y >= Meters::const_new(-1.5) 
+            && self.tile_rel.y <= Meters::const_new(1.5));
 
-        self.x.adjust(self.tile_rel_x.round() as i32);
-        self.tile_rel_x -= self.tile_rel_x.round();
+        self.tile_map_x.adjust(self.tile_rel.x.round() as i32);
+        self.tile_rel.x -= self.tile_rel.x.round();
 
-        self.y.adjust(self.tile_rel_y.round() as i32);
-        self.tile_rel_y -= self.tile_rel_y.round();
+        self.tile_map_y.adjust(self.tile_rel.y.round() as i32);
+        self.tile_rel.y -= self.tile_rel.y.round();
 
-        if *self.tile_rel_x <= -1.0 || *self.tile_rel_x >= 1.0 {
+        if *self.tile_rel.x <= -1.0 || *self.tile_rel.x >= 1.0 {
             dbg!(self);
             panic!("Bad x");
         }
 
-        if *self.tile_rel_y <= -1.0 || *self.tile_rel_y >= 1.0 {
+        if *self.tile_rel.y <= -1.0 || *self.tile_rel.y >= 1.0 {
             dbg!(self);
             panic!("Bad y");
         }
+    }
+
+    /// Return the [
+    pub fn into_chunk(&self) -> ChunkVector {
+        let Chunk { chunk_id: chunk_id_x, offset: x_offset } = self.tile_map_x.into_chunk();
+        let Chunk { chunk_id: chunk_id_y, offset: y_offset } = self.tile_map_y.into_chunk();
+
+        let chunk_id = Vector2::new(chunk_id_x, chunk_id_y);
+        let offset   = Vector2::new(x_offset, y_offset);
+
+        ChunkVector { chunk_id, offset }
     }
 }
 

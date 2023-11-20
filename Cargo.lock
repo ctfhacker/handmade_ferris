@@ -7,19 +7,28 @@ name = "game"
 version = "0.1.0"
 dependencies = [
  "game_state",
+ "vector",
 ]
 
 [[package]]
 name = "game_state"
 version = "0.1.0"
+dependencies = [
+ "vector",
+]
 
 [[package]]
 name = "handmade_ferris"
 version = "0.1.0"
 dependencies = [
  "game_state",
+ "vector",
  "x11-rs",
 ]
+
+[[package]]
+name = "vector"
+version = "0.1.0"
 
 [[package]]
 name = "x11-rs"

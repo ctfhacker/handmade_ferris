@@ -46,7 +46,7 @@ macro_rules! dbg_hex {
     ($val:expr $(,)?) => {
         match $val {
             tmp => {
-                println!("[{}:{}] {} = {:#x?}", file!(), line!(), stringify!($val), &tmp);
+                println!("[{}:{}] {} = {:x?}", file!(), line!(), stringify!($val), &tmp);
                 tmp
             }
         }
@@ -396,8 +396,8 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     if movement_delta.x != Meters::new(0.0) && movement_delta.y != Meters::new(0.0) {
         // 1/sqrt(2)
-        let one_div_sqrt_2 = std::f32::consts::FRAC_1_SQRT_2;
-        movement_delta *= Meters::new(one_div_sqrt_2);
+        let one_div_sqrt_2 = Meters::new(std::f32::consts::FRAC_1_SQRT_2);
+        movement_delta *= one_div_sqrt_2;
     }
 
     new_player += movement_delta;
@@ -455,14 +455,52 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
             offset,
         } = old_player.into_chunk();
 
+        // Use the original player's position since the new position is invalid
         tile_center.x = f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH);
         tile_center.y =
             display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT);
 
-        let old_tile_rel: Vector2<f32> =
-            Vector2::new(*old_player.tile_rel.x, *old_player.tile_rel.y);
+        let mut old_player = old_player;
 
-        player_bottom_center = tile_center - old_tile_rel;
+        // Move the player against the barrier if the player is not already at a
+        // tile's limit, but is against a wall
+        //
+        // Example: Player is moving to the right at a speed that would put
+        //          the player beyond a wall. Instead of leaving the player
+        //          where they were, move them to the wall
+        //
+        // Old Position:        New Position:
+        // +--------+##         +--------+##
+        // |        |##         |        |##
+        // | P      |## X       |       P|## NEWPOS
+        // |        |##         |        |##
+        // +--------+##         +--------+##
+        match state.player.direction {
+            PlayerDirection::Front => {
+                old_player.tile_rel.y = Meters::new(-0.499);
+            }
+            PlayerDirection::Back => {
+                old_player.tile_rel.y = Meters::new(0.499);
+            }
+            PlayerDirection::Right => {
+                old_player.tile_rel.x = Meters::new(0.499);
+            }
+            PlayerDirection::Left => {
+                old_player.tile_rel.x = Meters::new(-0.499);
+            }
+        }
+
+        // Update the player tile_rel in case the player's relative position changed
+        // (like moving them into a barrier)
+        state.player.position.tile_rel = old_player.tile_rel;
+
+        // Use the original player's position since the new position is invalid
+        player_bottom_center = Vector2::new(
+            tile_center.x + *old_player.tile_rel.x.into_pixels(),
+            tile_center.y - *old_player.tile_rel.y.into_pixels(),
+        );
+
+        // Adjust the player to always hit the edge of a barrier
     }
 
     let tile_half = Vector2::new(f32::from(TILE_HALF_WIDTH), f32::from(TILE_HALF_HEIGHT));

@@ -1,7 +1,7 @@
 //! Implementations of vector math operations
 
-use std::ops::{Add, AddAssign, Sub, Mul, MulAssign};
 use std::fmt::Debug;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub};
 
 /// A 2-dimensional Vector
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -10,10 +10,10 @@ pub struct Vector2<T: Clone + Copy> {
     pub x: T,
 
     /// Second element in this vector
-    pub y: T
+    pub y: T,
 }
 
-impl<T: Clone + Copy> Vector2<T> {
+impl<T: Clone + Copy + Mul<Output = T>> Vector2<T> {
     /// Create a new [`Vector2`]
     pub fn new(x: T, y: T) -> Self {
         Self { x, y }
@@ -79,13 +79,13 @@ impl<T: Sub<Output = T> + Copy + Clone + Copy> Sub<T> for Vector2<T> {
     }
 }
 
-impl<T: Mul<Output = T> + Clone + Copy> Mul for Vector2<T> {
-    type Output = Self;
+impl<T: Sub<Output = T> + Copy + Clone + Copy + Neg<Output = T>> Neg for Vector2<T> {
+    type Output = Vector2<T>;
 
-    fn mul(self, other: Self) -> Self::Output {
+    fn neg(self) -> Self::Output {
         Self {
-            x: self.x * other.x,
-            y: self.y * other.y,
+            x: -self.x,
+            y: -self.y,
         }
     }
 }
@@ -105,13 +105,6 @@ impl<T: Clone + Copy + Mul<Output = T>> MulAssign<T> for Vector2<T> {
     fn mul_assign(&mut self, right: T) {
         self.x = self.x * right;
         self.y = self.y * right;
-    }
-}
-
-impl<T: Clone + Copy + Mul<Output = T>> MulAssign<Vector2<T>> for Vector2<T> {
-    fn mul_assign(&mut self, right: Vector2<T>) {
-        self.x = self.x * right.x;
-        self.y = self.y * right.y;
     }
 }
 

@@ -1,7 +1,9 @@
 //! Shared game state information between platforms and game logic
 
 #![feature(const_fn_floating_point_arithmetic)]
+#![feature(variant_count)]
 
+use std::mem::variant_count;
 use std::ops::AddAssign;
 
 mod rng;
@@ -162,7 +164,7 @@ impl<'a> BitmapAsset<'a> {
         // correct location.
         //
         //                    +----------------------------+
-        //                    | Draw  |    BMP self       |
+        //                    | Draw  |    BMP self        |
         //                    |       |                    |
         // Requested start  -->*      |                    |
         //                    +-------+                    |
@@ -360,7 +362,7 @@ pub struct Game<'a> {
     pub memory: &'a mut Memory,
 
     /// Player assets specific to the direction the player is facing
-    pub player_assets: [&'a PlayerBitmap<'a>; PlayerDirection::COUNT as usize],
+    pub player_assets: [&'a PlayerBitmap<'a>; variant_count::<PlayerDirection>()],
 
     /// Background asset
     pub background: &'a BitmapAsset<'a>,
@@ -1047,7 +1049,4 @@ pub enum PlayerDirection {
 
     /// Player is facing right
     Right,
-
-    /// Number of elements in this enum
-    COUNT,
 }

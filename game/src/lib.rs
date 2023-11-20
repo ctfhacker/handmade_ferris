@@ -1,14 +1,12 @@
 //! Game logic for Handmade Ferris
 
 #![feature(const_fn_floating_point_arithmetic)]
-#![feature(const_fn_fn_ptr_basics)]
-#![feature(const_fn_trait_bound)]
 #![feature(stmt_expr_attributes)]
 
-use game_state::{TILE_MAP_ROWS, TILE_MAP_COLUMNS, Button, Meters, Memory, BitmapAsset};
-use game_state::{TILE_WIDTH, TILE_HEIGHT, TILE_HALF_WIDTH, TILE_HALF_HEIGHT};
-use game_state::{Truncate, GAME_WINDOW_HEIGHT, Color, PlayerDirection};
-use game_state::{Game, Result, Error, State, Rng, ChunkVector};
+use game_state::{BitmapAsset, Button, Memory, Meters, TILE_MAP_COLUMNS, TILE_MAP_ROWS};
+use game_state::{ChunkVector, Error, Game, Result, Rng, State};
+use game_state::{Color, PlayerDirection, Truncate, GAME_WINDOW_HEIGHT};
+use game_state::{TILE_HALF_HEIGHT, TILE_HALF_WIDTH, TILE_HEIGHT, TILE_WIDTH};
 
 use vector::Vector2;
 
@@ -23,14 +21,14 @@ pub enum TileType {
     Wall,
 
     /// Ladder tile
-    Ladder
+    Ladder,
 }
 
 impl From<TileType> for Color {
     fn from(tile: TileType) -> Color {
         match tile {
-            TileType::Wall   => Color::YELLOW,
-            TileType::Empty  => Color::GREY,
+            TileType::Wall => Color::YELLOW,
+            TileType::Empty => Color::GREY,
             TileType::Ladder => Color::BLUE,
         }
     }
@@ -58,7 +56,6 @@ macro_rules! dbg_hex {
     };
 }
 
-
 /// Single chunk of tiles. A collection of these [`TileMap`] make up an entire [`World`]
 pub struct TileMap<const WIDTH: usize, const HEIGHT: usize> {
     /// Tile map data
@@ -80,12 +77,10 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
         //    x0->
         let x = usize::from(pos.x);
         let y = HEIGHT - 1 - usize::from(pos.y);
-        assert!(x < WIDTH,  "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
+        assert!(x < WIDTH, "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
         assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
 
-        unsafe {
-            self.data.get_unchecked(y).get_unchecked(x)
-        }
+        unsafe { self.data.get_unchecked(y).get_unchecked(x) }
     }
 
     /// Draw the [`TileMap`] via the given [`Game`]
@@ -107,20 +102,22 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
                 // Get the color of the current tile
                 let color: Color = (*curr_tile).into();
 
-                let pixel_pos = Vector2::new(
-                    tile_pos.x * TILE_WIDTH,
-                    tile_pos.y * TILE_HEIGHT,
-                );
+                let pixel_pos = Vector2::new(tile_pos.x * TILE_WIDTH, tile_pos.y * TILE_HEIGHT);
 
                 // Get the upper left pixel of the current tile
                 let pixel_pos = Vector2::new(
                     f32::from(pixel_pos.x),
-                    display_lower_left_y - f32::from(pixel_pos.y)
+                    display_lower_left_y - f32::from(pixel_pos.y),
                 );
 
                 // Draw the tile
-                draw_rectangle(game, &color, pixel_pos,
-                    f32::from(TILE_WIDTH), f32::from(TILE_HEIGHT))?;
+                draw_rectangle(
+                    game,
+                    &color,
+                    pixel_pos,
+                    f32::from(TILE_WIDTH),
+                    f32::from(TILE_HEIGHT),
+                )?;
             }
         }
 
@@ -141,7 +138,7 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
         //    x0->
         let x = usize::from(x);
         let y = HEIGHT - 1 - usize::from(y);
-        assert!(x < WIDTH,  "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
+        assert!(x < WIDTH, "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
         assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
 
         unsafe {
@@ -165,7 +162,7 @@ pub struct World<const WIDTH: usize, const HEIGHT: usize> {
     next_tile_map_index: usize,
 
     /// Number of meters to step per frame
-    pub step_per_frame: Meters
+    pub step_per_frame: Meters,
 }
 
 impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
@@ -182,9 +179,16 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Out of slots to hold tile maps
-    pub fn alloc_tilemap_at(&mut self, memory: &mut Memory, pos: Vector2<u32>, z: u8) 
-            -> &mut TileMap<WIDTH, HEIGHT>  {
-        assert!(self.next_tile_map_index < PREALLOC_TILE_MAPS, "Out of tile map slot");
+    pub fn alloc_tilemap_at(
+        &mut self,
+        memory: &mut Memory,
+        pos: Vector2<u32>,
+        z: u8,
+    ) -> &mut TileMap<WIDTH, HEIGHT> {
+        assert!(
+            self.next_tile_map_index < PREALLOC_TILE_MAPS,
+            "Out of tile map slot"
+        );
 
         println!("Allocating tile map at ({:?}, {})", pos, z);
 
@@ -200,9 +204,7 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
         // Bump the tile map index
         self.next_tile_map_index += 1;
 
-        unsafe {
-            &mut *self.tile_maps[curr_tile_index]
-        }
+        unsafe { &mut *self.tile_maps[curr_tile_index] }
     }
 
     /// Get the [`TileMap`] at (`x`, `y`) in the World or allocate a new [`TileMap`] if
@@ -211,11 +213,19 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Sanity check of indexes is out of sync
-    pub fn get_tilemap_at(&mut self, pos: Vector2<u32>, z: u8, memory: &mut Memory, 
-            rng: &mut Rng) -> &mut TileMap<WIDTH, HEIGHT> {
+    pub fn get_tilemap_at(
+        &mut self,
+        pos: Vector2<u32>,
+        z: u8,
+        memory: &mut Memory,
+        rng: &mut Rng,
+    ) -> &mut TileMap<WIDTH, HEIGHT> {
         // Look for the requested (x, y) in the allocated tile maps and return the
         // pointer if found
-        for (index, coord) in self.tile_map_indexes[..self.next_tile_map_index].iter().enumerate() {
+        for (index, coord) in self.tile_map_indexes[..self.next_tile_map_index]
+            .iter()
+            .enumerate()
+        {
             assert!(coord.is_some(), "next_tile_map_index out of sync");
 
             if coord.unwrap() == (pos, z) {
@@ -229,10 +239,13 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
 
     /// Randomly initialize a tile map
     #[allow(clippy::cast_possible_truncation)]
-    fn init_tile_map(&mut self, 
-            chunk: Vector2<u32>,
-            z: u8, memory: &mut Memory, rng: &mut Rng) ->
-            &mut TileMap<WIDTH, HEIGHT> {
+    fn init_tile_map(
+        &mut self,
+        chunk: Vector2<u32>,
+        z: u8,
+        memory: &mut Memory,
+        rng: &mut Rng,
+    ) -> &mut TileMap<WIDTH, HEIGHT> {
         // If a ladder is drawn, write the ladder in the adjacent floor location
         let mut other_floor = None;
 
@@ -243,27 +256,24 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
 
         for y in 0..TILE_MAP_ROWS {
             for x in 0..TILE_MAP_COLUMNS {
-
                 // Draw the floor/ceiling with doors
                 if y == 0 || y == TILE_MAP_ROWS - 1 {
                     let mid_point = TILE_MAP_COLUMNS / 2;
-                    if (mid_point-1..=mid_point+1).contains(&x) {
+                    if (mid_point - 1..=mid_point + 1).contains(&x) {
                         tile_map.set_tile_at(x as u16, y as u16, TileType::Empty);
                     } else {
                         tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
                     }
                 }
-
                 // Draw the walls with doors
                 else if x == 0 || x == TILE_MAP_COLUMNS - 1 {
                     let mid_point = TILE_MAP_ROWS / 2;
-                    if (mid_point-1..=mid_point+1).contains(&y) {
+                    if (mid_point - 1..=mid_point + 1).contains(&y) {
                         tile_map.set_tile_at(x as u16, y as u16, TileType::Empty);
                     } else {
                         tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
                     }
                 }
-
                 // Randomly set values in a room
                 else if !ladder_set && rng.next() % 64 == 0 {
                     tile_map.set_tile_at(x as u16, y as u16, TileType::Ladder);
@@ -276,7 +286,6 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
 
                     continue;
                 }
-
                 // Randomly set values in a room
                 else if rng.next() % 16 == 0 {
                     tile_map.set_tile_at(x as u16, y as u16, TileType::Wall);
@@ -301,13 +310,13 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
 ///
 /// * On 16 bit machines
 #[no_mangle]
-pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
+pub extern "C" fn game_update_and_render(game: &mut Game, state: &mut State) {
     // Initialize the game memory if not already initialized
     if !game.memory.initialized {
         let world: *mut World<TILE_MAP_COLUMNS, TILE_MAP_ROWS> = game.memory.alloc();
 
         // Initialize the world
-        unsafe { 
+        unsafe {
             (*world).init();
         }
 
@@ -315,13 +324,12 @@ pub extern fn game_update_and_render(game: &mut Game, state: &mut State) {
         game.memory.initialized = true;
     }
 
-    // 
+    //
     let res = _game_update_and_render(game, state);
 
     // Update the error code between the game logic library and the platform layer
     game.error = res;
 }
-
 
 /// Actual game logic code that can return a [`Result`]
 fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
@@ -331,7 +339,11 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Get the world structure which is always at the beginning of the persistent memory
     let world = unsafe {
         #[allow(clippy::cast_ptr_alignment)]
-        &mut *(game.memory.data.as_mut_ptr().cast::<World<TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
+        &mut *(game
+            .memory
+            .data
+            .as_mut_ptr()
+            .cast::<World<TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
     };
 
     let old_player = state.player.position;
@@ -350,12 +362,12 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
         // Based on the button pressed, move the player
         match button {
-            Button::Up    => {
+            Button::Up => {
                 movement_delta.y += world.step_per_frame;
                 // new_player.tile_rel.y += ;
                 state.player.direction = PlayerDirection::Back;
             }
-            Button::Down  => {
+            Button::Down => {
                 // new_player.tile_rel.y -= world.step_per_frame;
                 movement_delta.y -= world.step_per_frame;
                 state.player.direction = PlayerDirection::Front;
@@ -365,7 +377,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
                 movement_delta.x += world.step_per_frame;
                 state.player.direction = PlayerDirection::Right;
             }
-            Button::Left  => {
+            Button::Left => {
                 // new_player.tile_rel.x -= world.step_per_frame;
                 movement_delta.x -= world.step_per_frame;
                 state.player.direction = PlayerDirection::Left;
@@ -397,8 +409,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     let ChunkVector { chunk_id, offset } = new_player.into_chunk();
 
-    let tile_map = world.get_tilemap_at(chunk_id, new_player.z,
-        game.memory, &mut state.rng);
+    let tile_map = world.get_tilemap_at(chunk_id, new_player.z, game.memory, &mut state.rng);
 
     // Draw the tile map
     tile_map.draw(game)?;
@@ -407,61 +418,63 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     let mut tile_center = Vector2::new(
         f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH),
-        display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT)
+        display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT),
     );
 
     let mut player_bottom_center = Vector2::new(
         tile_center.x + *new_player.tile_rel.x.into_pixels(),
-        tile_center.y - *new_player.tile_rel.y.into_pixels() 
+        tile_center.y - *new_player.tile_rel.y.into_pixels(),
     );
 
     // Check that the potential moved to tile is valid (aka, zero)
-    let mut valid = true; 
+    let mut valid = true;
 
     // Handle the tile type
     let next_tile = tile_map.get_tile_at(offset);
 
     // Block movement to walls
     if matches!(next_tile, &TileType::Wall) {
-        valid = false; 
+        valid = false;
     }
 
     // Only go up/down a ladder if the player didn't originally come from a ladder
-    if matches!(next_tile, &TileType::Ladder) 
-        && (new_player.tile_map_x != old_player.tile_map_x 
-                || new_player.tile_map_y != old_player.tile_map_y) {
+    if matches!(next_tile, &TileType::Ladder)
+        && (new_player.tile_map_x != old_player.tile_map_x
+            || new_player.tile_map_y != old_player.tile_map_y)
+    {
         new_player.z = (new_player.z + 1) % 2;
     }
 
     // If the move is valid, update the player
-    if valid { 
-        state.player.position  = new_player;
+    if valid {
+        state.player.position = new_player;
     } else {
         // Reset the coordinates for places where the player cannot move
-        let ChunkVector { chunk_id: _, offset } = old_player.into_chunk();
+        let ChunkVector {
+            chunk_id: _,
+            offset,
+        } = old_player.into_chunk();
 
         tile_center.x = f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH);
-        tile_center.y = display_lower_left_y 
-            - f32::from(offset.y * TILE_HEIGHT) 
-            - f32::from(TILE_HALF_HEIGHT);
+        tile_center.y =
+            display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT);
 
-
-        let old_tile_rel: Vector2<f32> = Vector2::new(
-            *old_player.tile_rel.x,
-            *old_player.tile_rel.y,
-        );
+        let old_tile_rel: Vector2<f32> =
+            Vector2::new(*old_player.tile_rel.x, *old_player.tile_rel.y);
 
         player_bottom_center = tile_center - old_tile_rel;
     }
 
-    let tile_half = Vector2::new(
-        f32::from(TILE_HALF_WIDTH), 
-        f32::from(TILE_HALF_HEIGHT)
-    );
+    let tile_half = Vector2::new(f32::from(TILE_HALF_WIDTH), f32::from(TILE_HALF_HEIGHT));
 
     // DEBUG player position
-    draw_rectangle(game, &Color::BLACK, tile_center - tile_half,
-        f32::from(TILE_WIDTH), f32::from(TILE_HEIGHT))?;
+    draw_rectangle(
+        game,
+        &Color::BLACK,
+        tile_center - tile_half,
+        f32::from(TILE_WIDTH),
+        f32::from(TILE_HEIGHT),
+    )?;
 
     // Get the player bitmap for the direction they are currently facing
     let player_asset = game.player_assets[state.player.direction as usize];
@@ -474,35 +487,42 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // DEBUG draw the player bottom center
     draw_rectangle(game, &Color::RED, player_bottom_center - 2.0, 4.0, 4.0)?;
 
-    Ok(()) 
+    Ok(())
 }
 
 /// Debug function to print a set of gradient squares to the display
-fn _test_gradient(game: &mut Game) { 
-    let height = u32::from(game.height); 
-    let width  = u32::from(game.width);
+fn _test_gradient(game: &mut Game) {
+    let height = u32::from(game.height);
+    let width = u32::from(game.width);
 
-    for col in 0..height { 
-        for row in 0..width { 
-            let index = col * width + row; 
+    for col in 0..height {
+        for row in 0..width {
+            let index = col * width + row;
             let color = (col % 256) << 8 | (row % 256);
             game.framebuffer[usize::try_from(index).unwrap()] = color;
-        }; 
-    } 
+        }
+    }
 }
 
 /// Fill a rectangle starting at the pixel (`pos_x`, `pos_y`) with a `width` and `height`
-fn draw_rectangle(game: &mut Game, color: &Color, pos: Vector2<f32>, 
-        width: f32, height: f32) -> Result<()> {
-    let upper_left_x  = pos.x;
-    let upper_left_y  = pos.y;
+fn draw_rectangle(
+    game: &mut Game,
+    color: &Color,
+    pos: Vector2<f32>,
+    width: f32,
+    height: f32,
+) -> Result<()> {
+    let upper_left_x = pos.x;
+    let upper_left_y = pos.y;
     let lower_right_x = pos.x + width;
     let lower_right_y = pos.y + height;
 
-    let upper_left_x   = upper_left_x.trunc_as_u32().clamp(0,  u32::from(game.width));
-    let lower_right_x  = lower_right_x.trunc_as_u32().clamp(0, u32::from(game.width));
-    let upper_left_y   = upper_left_y.trunc_as_u32().clamp(0,  u32::from(game.height));
-    let lower_right_y  = lower_right_y.trunc_as_u32().clamp(0, u32::from(game.height));
+    let upper_left_x = upper_left_x.trunc_as_u32().clamp(0, u32::from(game.width));
+    let lower_right_x = lower_right_x.trunc_as_u32().clamp(0, u32::from(game.width));
+    let upper_left_y = upper_left_y.trunc_as_u32().clamp(0, u32::from(game.height));
+    let lower_right_y = lower_right_y
+        .trunc_as_u32()
+        .clamp(0, u32::from(game.height));
 
     // If the upper left corner is not the upper left corner, return;
     if upper_left_x > lower_right_x || upper_left_y > lower_right_y {
@@ -518,24 +538,24 @@ fn draw_rectangle(game: &mut Game, color: &Color, pos: Vector2<f32>,
     }
 
     // Success!
-    Ok(()) }
+    Ok(())
+}
 
 /// Draw the given [`BitmapAsset`] at (`pos_x`, `pos_y`) on the screen
 fn _draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> Result<()> {
     let game_height = f32::from(game.height);
 
     #[allow(clippy::cast_precision_loss)]
-    let width  = asset.width as f32;
+    let width = asset.width as f32;
 
     #[allow(clippy::cast_precision_loss)]
     let height = asset.height as f32;
 
     let bytes_per_color = 4;
 
-
     // Because the BMP pixels are in bottom row -> top row order, if the requested width
     // or height is less than the asset width or height, start the pixels array from the
-    // correct location. 
+    // correct location.
     //
     //                    +----------------------------+
     //                    | Draw  |    BMP Asset       |
@@ -554,9 +574,9 @@ fn _draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> 
     if height + pos_y > game_height {
         let offscreen = height + pos_y - game_height as f32;
         starting_height += offscreen as usize;
-    } 
+    }
 
-    let mut starting_column = 0; 
+    let mut starting_column = 0;
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     if pos_x < 0.0 {
         starting_column = pos_x.round().abs().trunc() as usize;
@@ -565,15 +585,17 @@ fn _draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> 
     let starting_index = starting_height * asset.width as usize * 4;
     let pixels_start = &asset.data[starting_index..];
 
-    let upper_left_x  = pos_x;
-    let upper_left_y  = pos_y;
+    let upper_left_x = pos_x;
+    let upper_left_y = pos_y;
     let lower_right_x = pos_x + width;
     let lower_right_y = pos_y + height;
 
-    let upper_left_x   = upper_left_x.trunc_as_u32().clamp(0,  u32::from(game.width));
-    let lower_right_x  = lower_right_x.trunc_as_u32().clamp(0, u32::from(game.width));
-    let upper_left_y   = upper_left_y.trunc_as_u32().clamp(0,  u32::from(game.height));
-    let lower_right_y  = lower_right_y.trunc_as_u32().clamp(0, u32::from(game.height));
+    let upper_left_x = upper_left_x.trunc_as_u32().clamp(0, u32::from(game.width));
+    let lower_right_x = lower_right_x.trunc_as_u32().clamp(0, u32::from(game.width));
+    let upper_left_y = upper_left_y.trunc_as_u32().clamp(0, u32::from(game.height));
+    let lower_right_y = lower_right_y
+        .trunc_as_u32()
+        .clamp(0, u32::from(game.height));
 
     // If the upper left corner is not the upper left corner, return;
     if upper_left_x > lower_right_x || upper_left_y > lower_right_y {
@@ -594,7 +616,7 @@ fn _draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> 
         // In the event the image is off the left edge of the screen, the starting column
         // should be the remaining portion of the image not NOT from zero.
         let starting_column = starting_column as usize * bytes_per_color;
-        
+
         let mut pixels = &pixels_start[this_row + starting_column..];
 
         for col in upper_left_x..lower_right_x {
@@ -625,8 +647,8 @@ fn _draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> 
 
             pixels = &pixels[4..];
         }
-
     }
 
     // Success!
-    Ok(()) }
+    Ok(())
+}

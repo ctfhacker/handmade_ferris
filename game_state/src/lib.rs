@@ -1,8 +1,6 @@
 //! Shared game state information between platforms and game logic
 
-#![feature(asm)]
 #![feature(const_fn_floating_point_arithmetic)]
-#![feature(const_fn_fn_ptr_basics)]
 
 use std::ops::AddAssign;
 
@@ -24,7 +22,7 @@ pub const SCREEN_CENTER_ROW: usize = TILE_MAP_ROWS / 2;
 pub const SCREEN_CENTER_COLUMN: usize = TILE_MAP_COLUMNS / 2;
 
 /// Width of the game window
-pub const GAME_WINDOW_WIDTH:  u16 = 960;
+pub const GAME_WINDOW_WIDTH: u16 = 960;
 
 /// Height of the game window
 pub const GAME_WINDOW_HEIGHT: u16 = 540;
@@ -67,12 +65,12 @@ pub const TILE_RADIUS_IN_METERS: Meters = Meters::const_new(TILE_SIDE_IN_METERS.
 pub const TILE_SIDE_IN_PIXELS: Pixels = Pixels::const_new(60.0);
 
 /// Calculated pixels per meter
-pub const PIXELS_PER_METER: PixelsPerMeter 
-    = PixelsPerMeter::new(TILE_SIDE_IN_PIXELS, TILE_SIDE_IN_METERS);
+pub const PIXELS_PER_METER: PixelsPerMeter =
+    PixelsPerMeter::new(TILE_SIDE_IN_PIXELS, TILE_SIDE_IN_METERS);
 
 /// Provides the `truncate` trait for rounding `f32` to `u32`
 pub trait Truncate {
-    /// Truncate the given value 
+    /// Truncate the given value
     fn trunc_as_u32(self) -> u32;
 }
 
@@ -86,7 +84,7 @@ impl Truncate for f32 {
 
 /// Provides the `Round` trait for rounding `f32` to `u32`
 pub trait Round {
-    /// Truncate the given value 
+    /// Truncate the given value
     fn round_as_i32(self) -> i32;
 }
 
@@ -102,7 +100,7 @@ impl Round for f32 {
 #[derive(Debug)]
 pub enum Error {
     /// Attempted to draw an invalid rectangle
-    InvalidRectangle
+    InvalidRectangle,
 }
 
 /// Custom [`Result`] type for the game logic
@@ -111,7 +109,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// A bitmap asset
 pub struct BitmapAsset<'a> {
     /// Width of the bitmap in pixels
-    pub width:  u32,
+    pub width: u32,
 
     /// Height of the bitmap in pixels
     pub height: u32,
@@ -144,15 +142,15 @@ impl<'a> std::fmt::Debug for BitmapAsset<'a> {
 
 impl<'a> BitmapAsset<'a> {
     /// Draw this bitmap at (`pos_x`, `pos_y`) on the screen
-    /// 
+    ///
     /// # Panics
     ///
-    /// * 
+    /// *
     pub fn draw(&self, game: &mut Game, pos: Vector2<f32>) {
         let game_height = f32::from(game.height);
 
         #[allow(clippy::cast_precision_loss)]
-        let width  = self.width as f32;
+        let width = self.width as f32;
 
         #[allow(clippy::cast_precision_loss)]
         let height = self.height as f32;
@@ -161,7 +159,7 @@ impl<'a> BitmapAsset<'a> {
 
         // Because the BMP pixels are in bottom row -> top row order, if the requested width
         // or height is less than the self width or height, start the pixels array from the
-        // correct location. 
+        // correct location.
         //
         //                    +----------------------------+
         //                    | Draw  |    BMP self       |
@@ -180,9 +178,9 @@ impl<'a> BitmapAsset<'a> {
         if height + pos.y > game_height {
             let offscreen = height + pos.y - game_height as f32;
             starting_height += offscreen as usize;
-        } 
+        }
 
-        let mut starting_column = 0; 
+        let mut starting_column = 0;
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         if pos.x < 0.0 {
             starting_column = pos.x.round().abs().trunc() as usize;
@@ -191,19 +189,23 @@ impl<'a> BitmapAsset<'a> {
         let starting_index = starting_height * self.width as usize * 4;
         let pixels_start = &self.data[starting_index..];
 
-        let upper_left  = Vector2::new(
+        let upper_left = Vector2::new(
             pos.x.trunc_as_u32().clamp(0, u32::from(game.width)),
             pos.y.trunc_as_u32().clamp(0, u32::from(game.height)),
         );
 
         let lower_right = Vector2::new(
-            (pos.x + width).trunc_as_u32().clamp(0, u32::from(game.width)),
-            (pos.y + height).trunc_as_u32().clamp(0, u32::from(game.height))
+            (pos.x + width)
+                .trunc_as_u32()
+                .clamp(0, u32::from(game.width)),
+            (pos.y + height)
+                .trunc_as_u32()
+                .clamp(0, u32::from(game.height)),
         );
 
         // Get the color channel indexes for each color
-        let blue_index  = usize::from(self.blue_index);
-        let red_index   = usize::from(self.red_index);
+        let blue_index = usize::from(self.blue_index);
+        let red_index = usize::from(self.red_index);
         let green_index = usize::from(self.green_index);
         let alpha_index = usize::from(self.alpha_index);
 
@@ -216,7 +218,7 @@ impl<'a> BitmapAsset<'a> {
             // In the event the image is off the left edge of the screen, the starting column
             // should be the remaining portion of the image not NOT from zero.
             let starting_column = starting_column as usize * bytes_per_color;
-            
+
             let mut pixels = &pixels_start[this_row + starting_column..];
 
             for col in upper_left.x..lower_right.x {
@@ -225,9 +227,10 @@ impl<'a> BitmapAsset<'a> {
                     continue;
                 }
 
-                let index = row.checked_mul(u32::from(game.width))
-                               .and_then(|res| res.checked_add(col))
-                               .expect("Overflow");
+                let index = row
+                    .checked_mul(u32::from(game.width))
+                    .and_then(|res| res.checked_add(col))
+                    .expect("Overflow");
 
                 let index = usize::try_from(index).unwrap();
 
@@ -250,7 +253,6 @@ impl<'a> BitmapAsset<'a> {
 
                 pixels = &pixels[4..];
             }
-
         }
     }
 }
@@ -262,13 +264,13 @@ fn bit_scan_forward(val: u64) -> Option<u8> {
     }
 
     let mut res: u64;
-    unsafe { 
-        asm!(
-            "bsf {}, {}", 
-            out(reg) res,  
+    unsafe {
+        core::arch::asm!(
+            "bsf {}, {}",
+            out(reg) res,
             in(reg) val,
         );
-    } 
+    }
     Some(u8::try_from(res).unwrap())
 }
 
@@ -279,7 +281,7 @@ impl<'a> BitmapAsset<'a> {
         assert!(data.len() > 0x16 + 4, "BMP data too small");
 
         let offset = u32::from_le_bytes(data[0x0a..0x0a + 4].try_into().unwrap()) as usize;
-        let width  = u32::from_le_bytes(data[0x12..0x12 + 4].try_into().unwrap());
+        let width = u32::from_le_bytes(data[0x12..0x12 + 4].try_into().unwrap());
         let height = u32::from_le_bytes(data[0x16..0x16 + 4].try_into().unwrap());
         let r_mask = u32::from_le_bytes(data[0x36..0x36 + 4].try_into().unwrap());
         let g_mask = u32::from_le_bytes(data[0x3a..0x3a + 4].try_into().unwrap());
@@ -287,18 +289,19 @@ impl<'a> BitmapAsset<'a> {
         let a_mask = u32::from_le_bytes(data[0x42..0x42 + 4].try_into().unwrap());
 
         // Get the index value for the color channels specific for this image
-        let red_index   = bit_scan_forward(r_mask.into()).expect("Empty red mask?")   / 8;
+        let red_index = bit_scan_forward(r_mask.into()).expect("Empty red mask?") / 8;
         let green_index = bit_scan_forward(g_mask.into()).expect("Empty green mask?") / 8;
-        let blue_index  = bit_scan_forward(b_mask.into()).expect("Empty blue mask?")  / 8;
+        let blue_index = bit_scan_forward(b_mask.into()).expect("Empty blue mask?") / 8;
         let alpha_index = bit_scan_forward(a_mask.into()).expect("Empty alpha mask?") / 8;
 
-        BitmapAsset { 
-            width, height, 
-            red_index, 
-            green_index, 
-            blue_index, 
-            alpha_index, 
-            data: &data[offset..] 
+        BitmapAsset {
+            width,
+            height,
+            red_index,
+            green_index,
+            blue_index,
+            alpha_index,
+            data: &data[offset..],
         }
     }
 }
@@ -307,13 +310,13 @@ impl<'a> BitmapAsset<'a> {
 #[derive(Debug)]
 pub struct PlayerBitmap<'a> {
     /// [`BitmapAsset`] of the head of the player
-    pub head:  BitmapAsset<'a>,
+    pub head: BitmapAsset<'a>,
 
     /// [`BitmapAsset`] of the torso of the player
     pub torso: BitmapAsset<'a>,
 
     /// [`BitmapAsset`] of the cape of the player
-    pub cape:  BitmapAsset<'a>,
+    pub cape: BitmapAsset<'a>,
 
     /// The coordinate of the merge point from the upper left corner of the image
     pub merge_point: Vector2<f32>,
@@ -321,17 +324,23 @@ pub struct PlayerBitmap<'a> {
 
 impl<'a> PlayerBitmap<'a> {
     /// Create a [`PlayerBitmap`] from the given assets
-    pub fn from(head: BitmapAsset<'a>, torso: BitmapAsset<'a>,
-            cape: BitmapAsset<'a>, merge_point: Vector2<f32>) -> Self {
-
+    pub fn from(
+        head: BitmapAsset<'a>,
+        torso: BitmapAsset<'a>,
+        cape: BitmapAsset<'a>,
+        merge_point: Vector2<f32>,
+    ) -> Self {
         Self {
-            head, torso, cape, merge_point
+            head,
+            torso,
+            cape,
+            merge_point,
         }
     }
 }
 
 /// Game/Memory state
-pub struct Game<'a>  {
+pub struct Game<'a> {
     /// Framebuffer used for rendering to the window
     pub framebuffer: &'a mut Vec<u32>,
 
@@ -340,7 +349,7 @@ pub struct Game<'a>  {
 
     /// Height of the game window
     pub height: u16,
-    
+
     /// Potential error when executing the game logic
     pub error: Result<()>,
 
@@ -354,7 +363,7 @@ pub struct Game<'a>  {
     pub player_assets: [&'a PlayerBitmap<'a>; PlayerDirection::COUNT as usize],
 
     /// Background asset
-    pub background: &'a BitmapAsset<'a>
+    pub background: &'a BitmapAsset<'a>,
 }
 
 impl From<f32> for Meters {
@@ -424,7 +433,6 @@ impl std::ops::Add<Meters> for Meters {
         Meters(self.0 + rhs.0)
     }
 }
-
 
 impl std::ops::Sub<f32> for Meters {
     type Output = Self;
@@ -500,7 +508,7 @@ pub struct Player {
     pub position: WorldPosition,
 
     /// Direction the player is facing
-    pub direction: PlayerDirection
+    pub direction: PlayerDirection,
 }
 
 /// Game state
@@ -529,24 +537,22 @@ impl State {
                     tile_map_x: AbsoluteTile::from_chunk_offset(0, 5),
                     tile_map_y: AbsoluteTile::from_chunk_offset(0, 6),
                     z: 0,
-                    tile_rel: Vector2::new(
-                        Meters::new(0.0),
-                        Meters::new(0.0),
-                    )
+                    tile_rel: Vector2::new(Meters::new(0.0), Meters::new(0.0)),
                 },
 
-                direction: PlayerDirection::Front
+                direction: PlayerDirection::Front,
             },
             camera: WorldPosition {
-                tile_map_x: AbsoluteTile::from_chunk_offset(0, 
-                        SCREEN_CENTER_COLUMN.try_into().unwrap()),
-                tile_map_y: AbsoluteTile::from_chunk_offset(0, 
-                        SCREEN_CENTER_ROW.try_into().unwrap()),
+                tile_map_x: AbsoluteTile::from_chunk_offset(
+                    0,
+                    SCREEN_CENTER_COLUMN.try_into().unwrap(),
+                ),
+                tile_map_y: AbsoluteTile::from_chunk_offset(
+                    0,
+                    SCREEN_CENTER_ROW.try_into().unwrap(),
+                ),
                 z: 0,
-                tile_rel: Vector2::new(
-                    Meters::new(0.0),
-                    Meters::new(0.0),
-                )
+                tile_rel: Vector2::new(Meters::new(0.0), Meters::new(0.0)),
             },
             rng: Rng::new(),
         }
@@ -560,7 +566,7 @@ pub struct Chunk {
     pub chunk_id: u32,
 
     /// Offset into the chunk
-    pub offset: u16
+    pub offset: u16,
 }
 
 /// [`Chunk`] with `chunk_id` and `offset` as `Vector2`
@@ -569,7 +575,7 @@ pub struct ChunkVector {
     pub chunk_id: Vector2<u32>,
 
     /// Offset into the chunk
-    pub offset: Vector2<u16>
+    pub offset: Vector2<u16>,
 }
 
 /// An absolute tile location in the world, constrained to only be [`0`, `MAX`) in value.
@@ -577,23 +583,22 @@ pub struct ChunkVector {
 #[repr(transparent)]
 pub struct AbsoluteTile<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>(u32);
 
-impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> std::fmt::Debug 
-        for AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
+impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> std::fmt::Debug
+    for AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Chunk { chunk_id, offset } = self.into_chunk();
 
         f.debug_struct("AbsoluteTile")
-         .field("chunk_id", &chunk_id)
-         .field("offset", &offset)
-         .finish()
+            .field("chunk_id", &chunk_id)
+            .field("offset", &offset)
+            .finish()
     }
 }
 
-impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> 
-        AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
+impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
     /// Get an [`AbsoluteTile`] from the combined `chunk` and `offset`
-    pub fn from_chunk_offset(chunk: u32, offset: u32) 
-            -> AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
+    pub fn from_chunk_offset(chunk: u32, offset: u32) -> AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
         AbsoluteTile((chunk << CHUNK_SHIFT) | (offset & CHUNK_MASK))
     }
 
@@ -601,7 +606,7 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>
     pub fn into_chunk(&self) -> Chunk {
         Chunk {
             chunk_id: self.0 >> CHUNK_SHIFT,
-            offset:   (self.0 & CHUNK_MASK) as u16
+            offset: (self.0 & CHUNK_MASK) as u16,
         }
     }
 
@@ -654,27 +659,28 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>
                     chunk.offset -= 1;
                 }
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
-        
+
         // Re-write the modified chunk back
         *self = chunk.into();
     }
 }
 
-impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk> 
-        for AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
+impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk>
+    for AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET>
+{
     fn from(chunk: Chunk) -> AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET> {
         AbsoluteTile::<MAX_CHUNK_ID, MAX_OFFSET>(
-            (chunk.chunk_id << CHUNK_SHIFT) | (u32::from(chunk.offset) & CHUNK_MASK)
+            (chunk.chunk_id << CHUNK_SHIFT) | (u32::from(chunk.offset) & CHUNK_MASK),
         )
     }
 }
 
 /// A tile position in the world
 ///
-/// The [`AbsoluteTile`] contains the `chunk` and specific tile in the chunk itself, while 
-/// the `tile_rel_*` contains the relative offset the entity is within 
+/// The [`AbsoluteTile`] contains the `chunk` and specific tile in the chunk itself, while
+/// the `tile_rel_*` contains the relative offset the entity is within
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct WorldPosition {
     /// The x coordinate in the world
@@ -687,7 +693,7 @@ pub struct WorldPosition {
     pub z: u8,
 
     /// The relative position in a given tile
-    pub tile_rel: Vector2<Meters>
+    pub tile_rel: Vector2<Meters>,
 }
 
 impl AddAssign<Vector2<Meters>> for WorldPosition {
@@ -704,10 +710,12 @@ impl WorldPosition {
     /// * Fails to pass sanity check for the relative tile position
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn canonicalize(&mut self) {
-        assert!(self.tile_rel.x >= Meters::const_new(-1.5) 
-            && self.tile_rel.x <= Meters::const_new(1.5));
-        assert!(self.tile_rel.y >= Meters::const_new(-1.5) 
-            && self.tile_rel.y <= Meters::const_new(1.5));
+        assert!(
+            self.tile_rel.x >= Meters::const_new(-1.5) && self.tile_rel.x <= Meters::const_new(1.5)
+        );
+        assert!(
+            self.tile_rel.y >= Meters::const_new(-1.5) && self.tile_rel.y <= Meters::const_new(1.5)
+        );
 
         self.tile_map_x.adjust(self.tile_rel.x.round() as i32);
         self.tile_rel.x -= self.tile_rel.x.round();
@@ -728,11 +736,17 @@ impl WorldPosition {
 
     /// Return the `Vector2` of the (x, y) chunk coordinates
     pub fn into_chunk(&self) -> ChunkVector {
-        let Chunk { chunk_id: chunk_id_x, offset: x_offset } = self.tile_map_x.into_chunk();
-        let Chunk { chunk_id: chunk_id_y, offset: y_offset } = self.tile_map_y.into_chunk();
+        let Chunk {
+            chunk_id: chunk_id_x,
+            offset: x_offset,
+        } = self.tile_map_x.into_chunk();
+        let Chunk {
+            chunk_id: chunk_id_y,
+            offset: y_offset,
+        } = self.tile_map_y.into_chunk();
 
         let chunk_id = Vector2::new(chunk_id_x, chunk_id_y);
-        let offset   = Vector2::new(x_offset, y_offset);
+        let offset = Vector2::new(x_offset, y_offset);
 
         ChunkVector { chunk_id, offset }
     }
@@ -793,18 +807,17 @@ pub struct Memory {
     pub data_len: usize,
 
     /// Offset to the next allocation in the memory region
-    pub next_allocation: usize
+    pub next_allocation: usize,
 }
 
 impl Memory {
     /// Allocate a new chunk of memory
     pub fn new(size: usize) -> Self {
         Self {
-            initialized:     false,
-            data:            Vec::with_capacity(size),
-            data_len:        size,
-            next_allocation: 0
-
+            initialized: false,
+            data: Vec::with_capacity(size),
+            data_len: size,
+            next_allocation: 0,
         }
     }
 
@@ -814,13 +827,13 @@ impl Memory {
     ///
     /// * Out of allocated memory
     pub fn alloc<T: Sized>(&mut self) -> *mut T {
-        assert!(self.next_allocation + std::mem::size_of::<T>() < self.data_len, 
-            "Out of game memory");
+        assert!(
+            self.next_allocation + std::mem::size_of::<T>() < self.data_len,
+            "Out of game memory"
+        );
 
         // Get the resulting address
-        let result = unsafe { 
-            self.data.as_mut_ptr().add(self.next_allocation)
-        };
+        let result = unsafe { self.data.as_mut_ptr().add(self.next_allocation) };
 
         // Bump the allocation to fit the requested type
         self.next_allocation += std::mem::size_of::<T>();
@@ -832,7 +845,6 @@ impl Memory {
         result.cast::<T>()
     }
 }
-
 
 /// Color represented by red, green, blue pigments with alpha channel
 #[derive(Debug, Copy, Clone)]
@@ -848,7 +860,6 @@ pub struct Color {
 
     /// Percentage of alpha from 0.0 .. 1.0
     alpha: Alpha,
-
 }
 
 impl From<u8> for Color {
@@ -862,7 +873,8 @@ impl From<u8> for Color {
 }
 
 /// Creates the bounded color values to percentages of [0.0..1.0]
-macro_rules! make_color { ($color:ident) => {
+macro_rules! make_color {
+    ($color:ident) => {
         /// Red color bounded to the percentage of 0.0 to 1.0
         #[derive(Debug, Copy, Clone)]
         struct $color(f32);
@@ -870,11 +882,13 @@ macro_rules! make_color { ($color:ident) => {
         impl $color {
             /// Create a new [`Red`] percentage, checked at compile time that it is
             /// within the bounds [0.0..1.0]
-            const fn new(val: f32) -> $color { 
-                assert!(0.0 <= val && val <= 1.0,
-                concat!(stringify!($color), " value out of bounds [0.0..1.0]"));
-                $color(val) 
-            } 
+            const fn new(val: f32) -> $color {
+                assert!(
+                    0.0 <= val && val <= 1.0,
+                    concat!(stringify!($color), " value out of bounds [0.0..1.0]")
+                );
+                $color(val)
+            }
         }
 
         impl std::ops::Deref for $color {
@@ -885,13 +899,12 @@ macro_rules! make_color { ($color:ident) => {
             }
         }
 
-
         impl std::ops::DerefMut for $color {
             fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
             }
         }
-    }
+    };
 }
 
 make_color!(Red);
@@ -902,53 +915,74 @@ make_color!(Alpha);
 impl Color {
     /// The color red
     #[allow(dead_code)]
-    pub const RED:   Color = Color { 
-        red: Red::new(1.), green: Green::new(0.), blue: Blue::new(0.), alpha: Alpha::new(0.)
+    pub const RED: Color = Color {
+        red: Red::new(1.),
+        green: Green::new(0.),
+        blue: Blue::new(0.),
+        alpha: Alpha::new(0.),
     };
 
     /// The color blue
     #[allow(dead_code)]
-    pub const BLUE:  Color = Color { 
-        red: Red::new(0.), green: Green::new(0.), blue: Blue::new(1.), alpha: Alpha::new(0.)
+    pub const BLUE: Color = Color {
+        red: Red::new(0.),
+        green: Green::new(0.),
+        blue: Blue::new(1.),
+        alpha: Alpha::new(0.),
     };
 
     /// The color green
     #[allow(dead_code)]
-    pub const GREEN: Color = Color { 
-        red: Red::new(0.), green: Green::new(1.), blue: Blue::new(0.), alpha: Alpha::new(0.)
+    pub const GREEN: Color = Color {
+        red: Red::new(0.),
+        green: Green::new(1.),
+        blue: Blue::new(0.),
+        alpha: Alpha::new(0.),
     };
 
     /// The color yellow
     #[allow(dead_code)]
-    pub const YELLOW: Color = Color { 
-        red: Red::new(1.), green: Green::new(1.), blue: Blue::new(0.), alpha: Alpha::new(0.)
+    pub const YELLOW: Color = Color {
+        red: Red::new(1.),
+        green: Green::new(1.),
+        blue: Blue::new(0.),
+        alpha: Alpha::new(0.),
     };
 
     /// The color white
     #[allow(dead_code)]
-    pub const WHITE: Color = Color { 
-        red: Red::new(1.), green: Green::new(1.), blue: Blue::new(1.), alpha: Alpha::new(0.)
+    pub const WHITE: Color = Color {
+        red: Red::new(1.),
+        green: Green::new(1.),
+        blue: Blue::new(1.),
+        alpha: Alpha::new(0.),
     };
 
     /// The color white
     #[allow(dead_code)]
-    pub const BLACK: Color = Color { 
-        red: Red::new(0.), green: Green::new(0.), blue: Blue::new(0.), alpha: Alpha::new(0.)
-    }; 
+    pub const BLACK: Color = Color {
+        red: Red::new(0.),
+        green: Green::new(0.),
+        blue: Blue::new(0.),
+        alpha: Alpha::new(0.),
+    };
     /// The color white
     #[allow(dead_code)]
-    pub const GREY: Color = Color { 
-        red: Red::new(0.5), green: Green::new(0.5), blue: Blue::new(0.5), alpha: Alpha::new(0.)
+    pub const GREY: Color = Color {
+        red: Red::new(0.5),
+        green: Green::new(0.5),
+        blue: Blue::new(0.5),
+        alpha: Alpha::new(0.),
     };
 
     /// Create a [`Color`] from `red`, `green`, and `blue` percentages
     #[allow(dead_code)]
     pub const fn rgb(red: f32, green: f32, blue: f32) -> Self {
         Self {
-            red:   Red::new(red),
+            red: Red::new(red),
             green: Green::new(green),
-            blue:  Blue::new(blue),
-            alpha: Alpha::new(0.0)
+            blue: Blue::new(blue),
+            alpha: Alpha::new(0.0),
         }
     }
 
@@ -956,43 +990,45 @@ impl Color {
     #[allow(dead_code)]
     pub const fn rgba(red: f32, green: f32, blue: f32, alpha: f32) -> Self {
         Self {
-            red:   Red::new(red),
+            red: Red::new(red),
             green: Green::new(green),
-            blue:  Blue::new(blue),
-            alpha: Alpha::new(alpha)
+            blue: Blue::new(blue),
+            alpha: Alpha::new(alpha),
         }
     }
 
     /// `u32` representation of the [`Color`]
     #[inline]
     pub fn as_u32(&self) -> u32 {
-        (*self.alpha * 255.).trunc_as_u32() << 24 | 
-        (*self.red   * 255.).trunc_as_u32() << 16 | 
-        (*self.green * 255.).trunc_as_u32() <<  8 |
-        (*self.blue  * 255.).trunc_as_u32()
+        (*self.alpha * 255.).trunc_as_u32() << 24
+            | (*self.red * 255.).trunc_as_u32() << 16
+            | (*self.green * 255.).trunc_as_u32() << 8
+            | (*self.blue * 255.).trunc_as_u32()
     }
 
     /// Linear blend the (red, green, and blue) channels with the `background` [`Color`]
     pub fn linear_alpha_blend(&mut self, background: Color) {
         let alpha = self.alpha.0;
 
-        self.red.0   = alpha * self.red.0   + background.red.0   * (1.0 - alpha);
-        self.blue.0  = alpha * self.blue.0  + background.blue.0  * (1.0 - alpha);
+        self.red.0 = alpha * self.red.0 + background.red.0 * (1.0 - alpha);
+        self.blue.0 = alpha * self.blue.0 + background.blue.0 * (1.0 - alpha);
         self.green.0 = alpha * self.green.0 + background.green.0 * (1.0 - alpha);
     }
 }
-
 
 impl From<u32> for Color {
     #[allow(clippy::cast_possible_truncation)]
     fn from(val: u32) -> Color {
         let alpha = Alpha::new(f32::from((val >> 24) as u8) / 255.0);
-        let red   = Red::new(f32::from((val >> 16) as u8) / 255.0);
-        let green = Green::new(f32::from((val >>  8) as u8) / 255.0);
-        let blue  = Blue::new(f32::from(val as u8) / 255.0);
+        let red = Red::new(f32::from((val >> 16) as u8) / 255.0);
+        let green = Green::new(f32::from((val >> 8) as u8) / 255.0);
+        let blue = Blue::new(f32::from(val as u8) / 255.0);
 
         Color {
-            red, green, blue, alpha
+            red,
+            green,
+            blue,
+            alpha,
         }
     }
 }
@@ -1013,5 +1049,5 @@ pub enum PlayerDirection {
     Right,
 
     /// Number of elements in this enum
-    COUNT
+    COUNT,
 }

@@ -1,9 +1,8 @@
 //! Linux platform for Handmade Ferris
-#![feature(asm)]
 #![feature(const_format_args)]
 
 mod dl;
-use game_state::{GAME_WINDOW_WIDTH, GAME_WINDOW_HEIGHT, Game, Button, Memory, BitmapAsset};
+use game_state::{BitmapAsset, Button, Game, Memory, GAME_WINDOW_HEIGHT, GAME_WINDOW_WIDTH};
 use game_state::{PlayerBitmap, PlayerDirection};
 
 use vector::Vector2;
@@ -15,25 +14,25 @@ const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
 macro_rules! load_asset {
     ($name:ident) => {
         // Get the path for this asset
-        let path  = concat!("assets/early_data/test/test_hero_", stringify!($name));
-        let cape  = format!("{}_cape.bmp", path);
+        let path = concat!("assets/early_data/test/test_hero_", stringify!($name));
+        let cape = format!("{}_cape.bmp", path);
         let torso = format!("{}_torso.bmp", path);
-        let head  = format!("{}_head.bmp", path);
+        let head = format!("{}_head.bmp", path);
         dbg!(&path, &cape, &torso, &head);
 
         // Read each of the pieces of the asset
-        let cape  = std::fs::read(cape).unwrap();
+        let cape = std::fs::read(cape).unwrap();
         let torso = std::fs::read(torso).unwrap();
-        let head  = std::fs::read(head).unwrap();
+        let head = std::fs::read(head).unwrap();
 
         // Create the player bitmap for this asset
         let $name = PlayerBitmap::from(
             BitmapAsset::from_data(&head),
             BitmapAsset::from_data(&torso),
             BitmapAsset::from_data(&cape),
-            Vector2::new(73.0, 174.0)
+            Vector2::new(73.0, 174.0),
         );
-    }
+    };
 }
 
 /// Number of microseconds available per frame
@@ -81,8 +80,8 @@ fn main() {
     // Set the assets into the player assets array
     let mut player_assets = [&front, &front, &front, &front];
     player_assets[PlayerDirection::Front as usize] = &front;
-    player_assets[PlayerDirection::Back as usize]  = &back;
-    player_assets[PlayerDirection::Left as usize]  = &left;
+    player_assets[PlayerDirection::Back as usize] = &back;
+    player_assets[PlayerDirection::Left as usize] = &left;
     player_assets[PlayerDirection::Right as usize] = &right;
 
     let background = std::fs::read("assets/early_data/test/test_background.bmp")
@@ -110,9 +109,9 @@ fn main() {
                     'd' => Some(Button::Right),
                     'n' => Some(Button::DecreaseSpeed),
                     'm' => Some(Button::IncreaseSpeed),
-                      _ => None
+                    _ => None,
                 };
-    
+
                 if let Some(button) = button {
                     buttons[button as usize] = true;
                 }
@@ -125,9 +124,9 @@ fn main() {
                     'd' => Some(Button::Right),
                     'n' => Some(Button::DecreaseSpeed),
                     'm' => Some(Button::IncreaseSpeed),
-                      _ => None
+                    _ => None,
                 };
-    
+
                 if let Some(button) = button {
                     buttons[button as usize] = false;
                 }
@@ -135,25 +134,27 @@ fn main() {
             Some(x11_rs::Event::Unknown(val)) => {
                 println!("Unknown event: {}", val);
             }
-            Some(x11_rs::Event::Expose) | None => {
-            }
+            Some(x11_rs::Event::Expose) | None => {}
         }
 
         // Debug print the frames per second
         if frame > 0 && frame % 30 == 0 {
-            println!("Frames: {} Frames/sec: {:6.2}", frame, 
-                f64::from(frame) / time_begin.elapsed().as_secs_f64());
+            println!(
+                "Frames: {} Frames/sec: {:6.2}",
+                frame,
+                f64::from(frame) / time_begin.elapsed().as_secs_f64()
+            );
         }
 
         // Prepare the game state for the game logic
         let mut game = Game {
-            framebuffer:   &mut window.framebuffer,
-            width:         GAME_WINDOW_WIDTH,
-            height:        GAME_WINDOW_HEIGHT,
-            error:         Ok(()),
-            buttons:       &buttons,
-            memory:        &mut memory,
-            background:    &background,
+            framebuffer: &mut window.framebuffer,
+            width: GAME_WINDOW_WIDTH,
+            height: GAME_WINDOW_HEIGHT,
+            error: Ok(()),
+            buttons: &buttons,
+            memory: &mut memory,
+            background: &background,
             player_assets,
         };
 
@@ -175,11 +176,12 @@ fn main() {
         // clamping the value to zero
         let remaining = MILLISECONDS_PER_FRAME.saturating_sub(elapsed);
 
-        // If there is any remaining time needed to pad until the next frame, sleep for 
+        // If there is any remaining time needed to pad until the next frame, sleep for
         // that duration
         if remaining > 0 {
             std::thread::sleep(std::time::Duration::from_millis(
-                    remaining.try_into().unwrap()));
+                remaining.try_into().unwrap(),
+            ));
         }
     }
 }

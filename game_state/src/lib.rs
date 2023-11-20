@@ -356,7 +356,7 @@ pub struct Game<'a> {
     pub error: Result<()>,
 
     /// Current buttons pressed
-    pub buttons: &'a [bool; Button::Count as usize],
+    pub buttons: &'a [bool; variant_count::<Button>()],
 
     /// Reference to the memory backing the game
     pub memory: &'a mut Memory,
@@ -774,17 +774,13 @@ pub enum Button {
 
     /// Increase player speed
     IncreaseSpeed,
-
-    /// Total number of button attributes
-    Count,
-    // Nothing should be added under this value
 }
 
 impl Button {
     /// Get a [`Button`] from a `usize`
     pub const fn from_usize(val: usize) -> Self {
         /// All values for the buttons
-        const VALS: [Button; Button::Count as usize] = [
+        const VALS: [Button; variant_count::<Button>()] = [
             Button::Up,
             Button::Down,
             Button::Left,

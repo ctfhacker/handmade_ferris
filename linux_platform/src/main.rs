@@ -1,5 +1,8 @@
 //! Linux platform for Handmade Ferris
 #![feature(const_format_args)]
+#![feature(variant_count)]
+
+use core::mem::variant_count;
 
 mod dl;
 use game_state::{BitmapAsset, Button, Game, Memory, GAME_WINDOW_HEIGHT, GAME_WINDOW_WIDTH};
@@ -67,10 +70,11 @@ fn main() {
     let mut state = game_state::State::reset();
 
     // Current button states for the game
-    let mut buttons = [false; Button::Count as usize];
+    let mut buttons = [false; variant_count::<Button>()];
 
     // Persistent memory for the game
     let mut memory = Memory::new(2 * 1024 * 1024);
+
     // Load the player assets
     load_asset!(front);
     load_asset!(left);

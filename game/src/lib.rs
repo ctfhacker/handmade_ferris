@@ -364,21 +364,17 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         match button {
             Button::Up => {
                 movement_delta.y += world.step_per_frame;
-                // new_player.tile_rel.y += ;
                 state.player.direction = PlayerDirection::Back;
             }
             Button::Down => {
-                // new_player.tile_rel.y -= world.step_per_frame;
                 movement_delta.y -= world.step_per_frame;
                 state.player.direction = PlayerDirection::Front;
             }
             Button::Right => {
-                // new_player.tile_rel.x += world.step_per_frame;
                 movement_delta.x += world.step_per_frame;
                 state.player.direction = PlayerDirection::Right;
             }
             Button::Left => {
-                // new_player.tile_rel.x -= world.step_per_frame;
                 movement_delta.x -= world.step_per_frame;
                 state.player.direction = PlayerDirection::Left;
             }
@@ -390,16 +386,18 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
                 world.step_per_frame += Meters::new(0.06);
                 world.step_per_frame = world.step_per_frame.clamp(0.05, 1.0).into();
             }
-            Button::Count => {}
         }
     }
 
+    // If moving along a diagonal, do pythagorean theorem to get the diagonal
+    // distance and not strictly the sum of both x and y.
     if movement_delta.x != Meters::new(0.0) && movement_delta.y != Meters::new(0.0) {
         // 1/sqrt(2)
         let one_div_sqrt_2 = Meters::new(std::f32::consts::FRAC_1_SQRT_2);
         movement_delta *= one_div_sqrt_2;
     }
 
+    // Move the player by delta based on the current key presses
     new_player += movement_delta;
 
     // Update the player coordinates based on the movement. If the player has stepped
@@ -460,6 +458,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         tile_center.y =
             display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT);
 
+        // Make the old_player mutable
         let mut old_player = old_player;
 
         // Move the player against the barrier if the player is not already at a

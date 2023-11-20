@@ -3,7 +3,9 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(stmt_expr_attributes)]
 
-use game_state::{BitmapAsset, Button, Memory, Meters, TILE_MAP_COLUMNS, TILE_MAP_ROWS};
+use std::ops::Neg;
+
+use game_state::{BitmapAsset, Button, Memory, Meters, TILE_MAP_COLUMNS, TILE_MAP_ROWS, MILLISECONDS_PER_FRAME};
 use game_state::{ChunkVector, Error, Game, Result, Rng, State};
 use game_state::{Color, PlayerDirection, Truncate, GAME_WINDOW_HEIGHT};
 use game_state::{TILE_HALF_HEIGHT, TILE_HALF_WIDTH, TILE_HEIGHT, TILE_WIDTH};
@@ -161,8 +163,8 @@ pub struct World<const WIDTH: usize, const HEIGHT: usize> {
     /// Index to the next tile_map slot
     next_tile_map_index: usize,
 
-    /// Number of meters to step per frame
-    pub step_per_frame: Meters,
+    /// Number of meters to step per frame (time delta)
+    pub delta_t: Meters,
 }
 
 impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
@@ -171,7 +173,7 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
         self.tile_maps = [std::ptr::null_mut(); PREALLOC_TILE_MAPS];
         self.tile_map_indexes = [None; PREALLOC_TILE_MAPS];
         self.next_tile_map_index = 0;
-        self.step_per_frame = Meters::new(0.11);
+        self.delta_t = Meters::new(MILLISECONDS_PER_FRAME / 1000.);
     }
 
     /// Allocate a new [`TileMap`] at chunk id (`x`, `y`)
@@ -347,9 +349,9 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     };
 
     let old_player = state.player.position;
-    let mut new_player = state.player.position;
 
-    let mut movement_delta = Vector2::new(Meters::new(0.), Meters::new(0.));
+    // let mut movement_delta = Vector2::new(Meters::new(0.), Meters::new(0.));
+    let mut acceleration = Vector2::new(Meters::new(0.), Meters::new(0.));
 
     for (button_id, is_pressed) in game.buttons.as_ref().iter().enumerate() {
         // Not pressed, ignore the button
@@ -363,42 +365,66 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         // Based on the button pressed, move the player
         match button {
             Button::Up => {
-                movement_delta.y += world.step_per_frame;
+                acceleration.y = Meters::new(1.0);
                 state.player.direction = PlayerDirection::Back;
             }
             Button::Down => {
-                movement_delta.y -= world.step_per_frame;
+                acceleration.y = Meters::new(-1.0);
                 state.player.direction = PlayerDirection::Front;
             }
             Button::Right => {
-                movement_delta.x += world.step_per_frame;
+                acceleration.x = Meters::new(1.0);
                 state.player.direction = PlayerDirection::Right;
             }
             Button::Left => {
-                movement_delta.x -= world.step_per_frame;
+                acceleration.x = Meters::new(-1.0);
                 state.player.direction = PlayerDirection::Left;
             }
             Button::DecreaseSpeed => {
-                world.step_per_frame -= Meters::new(0.06);
-                world.step_per_frame = world.step_per_frame.clamp(0.05, 1.0).into();
+                acceleration *= Meters::new(0.5);
             }
             Button::IncreaseSpeed => {
-                world.step_per_frame += Meters::new(0.06);
-                world.step_per_frame = world.step_per_frame.clamp(0.05, 1.0).into();
+                acceleration *= Meters::new(10.0);
             }
         }
     }
 
     // If moving along a diagonal, do pythagorean theorem to get the diagonal
     // distance and not strictly the sum of both x and y.
-    if movement_delta.x != Meters::new(0.0) && movement_delta.y != Meters::new(0.0) {
+    if acceleration.x != Meters::new(0.0) && acceleration.y != Meters::new(0.0) {
         // 1/sqrt(2)
         let one_div_sqrt_2 = Meters::new(std::f32::consts::FRAC_1_SQRT_2);
-        movement_delta *= one_div_sqrt_2;
+        acceleration *= one_div_sqrt_2;
     }
 
+    let player_speed = Meters::new(10.0);
+    acceleration *= player_speed;
+
+    // ODE here!
+    // Add a pseudo-friction force here
+    let friction_const = 1.0.into();
+    acceleration += state.player.velocity.neg() * friction_const;
+
+    // Derived in Day 043
+    // a - Acceleration | v - Velocity | p - Position
+    // new_position     = 0.5*a*t^2 + v*t + p
+    // new_velocity     = at + v
+    // new_acceleration = a
+
     // Move the player by delta based on the current key presses
-    new_player += movement_delta;
+    let mut new_player = state.player.position;
+
+    // Use the new position equation above to calculate the new position
+    new_player.tile_rel = 
+        // 0.5 * a * t^2
+        acceleration * Meters::new(0.5) * world.delta_t.powi(2).into() 
+        // v * t
+        + state.player.velocity * world.delta_t
+        // p
+        + new_player.tile_rel;
+
+    // Use the velocity equation to calculate the new player velocity
+    state.player.velocity = acceleration * world.delta_t + state.player.velocity;
 
     // Update the player coordinates based on the movement. If the player has stepped
     // beyond the bounds of the current tile, update the position to the new tile.
@@ -447,6 +473,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     if valid {
         state.player.position = new_player;
     } else {
+
         // Reset the coordinates for places where the player cannot move
         let ChunkVector {
             chunk_id: _,
@@ -458,8 +485,6 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         tile_center.y =
             display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT);
 
-        // Make the old_player mutable
-        let mut old_player = old_player;
 
         // Move the player against the barrier if the player is not already at a
         // tile's limit, but is against a wall
@@ -474,20 +499,25 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         // | P      |## X       |       P|## NEWPOS
         // |        |##         |        |##
         // +--------+##         +--------+##
+        /*
+        // Make the old_player mutable
+        let mut old_player = old_player;
+
         match state.player.direction {
             PlayerDirection::Front => {
-                old_player.tile_rel.y = Meters::new(-0.499);
+                old_player.tile_rel.y = Meters::new(-0.35);
             }
             PlayerDirection::Back => {
-                old_player.tile_rel.y = Meters::new(0.499);
+                old_player.tile_rel.y = Meters::new(0.35);
             }
             PlayerDirection::Right => {
-                old_player.tile_rel.x = Meters::new(0.499);
+                old_player.tile_rel.x = Meters::new(0.35);
             }
             PlayerDirection::Left => {
-                old_player.tile_rel.x = Meters::new(-0.499);
+                old_player.tile_rel.x = Meters::new(-0.35);
             }
         }
+        */
 
         // Update the player tile_rel in case the player's relative position changed
         // (like moving them into a barrier)
@@ -499,7 +529,8 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
             tile_center.y - *old_player.tile_rel.y.into_pixels(),
         );
 
-        // Adjust the player to always hit the edge of a barrier
+        // Stop the velocity if we hit a wall
+        state.player.velocity = Vector2::new(Meters::new(0.0), Meters::new(0.0));
     }
 
     let tile_half = Vector2::new(f32::from(TILE_HALF_WIDTH), f32::from(TILE_HALF_HEIGHT));

@@ -5,13 +5,11 @@
 use core::mem::variant_count;
 
 mod dl;
+use game_state::MILLISECONDS_PER_FRAME;
 use game_state::{BitmapAsset, Button, Game, Memory, GAME_WINDOW_HEIGHT, GAME_WINDOW_WIDTH};
 use game_state::{PlayerBitmap, PlayerDirection};
 
 use vector::Vector2;
-
-/// Target FPS for the game
-const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
 
 /// Loads the front/left/right/back player assets from `assets/early_data/test/test_hero_`
 macro_rules! load_asset {
@@ -37,12 +35,6 @@ macro_rules! load_asset {
         );
     };
 }
-
-/// Number of microseconds available per frame
-///
-/// Acutally do want this to truncate
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-const MILLISECONDS_PER_FRAME: u128 = (1.0 / TARGET_FRAMES_PER_SECOND * 1000.) as u128;
 
 fn main() {
     let mut window = x11_rs::SimpleWindow::build()
@@ -142,7 +134,7 @@ fn main() {
         }
 
         // Debug print the frames per second
-        if frame > 0 && frame % 30 == 0 {
+        if frame > 0 && frame % 120 == 0 {
             println!(
                 "Frames: {} Frames/sec: {:6.2}",
                 frame,
@@ -178,7 +170,7 @@ fn main() {
 
         // Get the number of milliseconds remaining to hit the target frame count,
         // clamping the value to zero
-        let remaining = MILLISECONDS_PER_FRAME.saturating_sub(elapsed);
+        let remaining = (MILLISECONDS_PER_FRAME as u128).saturating_sub(elapsed);
 
         // If there is any remaining time needed to pad until the next frame, sleep for
         // that duration

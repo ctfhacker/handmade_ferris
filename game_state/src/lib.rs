@@ -66,9 +66,18 @@ pub const TILE_RADIUS_IN_METERS: Meters = Meters::const_new(TILE_SIDE_IN_METERS.
 /// Tile size in pixels
 pub const TILE_SIDE_IN_PIXELS: Pixels = Pixels::const_new(60.0);
 
+/// Target FPS for the game
+pub const TARGET_FRAMES_PER_SECOND: f32 = 30.0;
+
 /// Calculated pixels per meter
 pub const PIXELS_PER_METER: PixelsPerMeter =
     PixelsPerMeter::new(TILE_SIDE_IN_PIXELS, TILE_SIDE_IN_METERS);
+
+/// Number of microseconds available per frame
+///
+/// Acutally do want this to truncate
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub const MILLISECONDS_PER_FRAME: f32 = 1.0 / TARGET_FRAMES_PER_SECOND * 1000.;
 
 /// Provides the `truncate` trait for rounding `f32` to `u32`
 pub trait Truncate {
@@ -443,6 +452,14 @@ impl std::ops::Sub<f32> for Meters {
     }
 }
 
+impl std::ops::Sub<Meters> for Meters {
+    type Output = Self;
+
+    fn sub(self, rhs: Meters) -> Self::Output {
+        Meters(self.0 - rhs.0)
+    }
+}
+
 impl std::ops::SubAssign<f32> for Meters {
     fn sub_assign(&mut self, rhs: f32) {
         self.0 -= rhs;
@@ -453,6 +470,13 @@ impl std::ops::Mul<Meters> for Meters {
     type Output = Self;
     fn mul(self, rhs: Meters) -> Self::Output {
         Meters(self.0 * rhs.0)
+    }
+}
+
+impl std::ops::Neg for Meters {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Meters(-self.0)
     }
 }
 
@@ -511,6 +535,9 @@ pub struct Player {
 
     /// Direction the player is facing
     pub direction: PlayerDirection,
+
+    /// The current velocity that the player is moving
+    pub velocity: Vector2<Meters>,
 }
 
 /// Game state
@@ -541,8 +568,8 @@ impl State {
                     z: 0,
                     tile_rel: Vector2::new(Meters::new(0.0), Meters::new(0.0)),
                 },
-
                 direction: PlayerDirection::Front,
+                velocity: Vector2::new(Meters::new(0.0), Meters::new(0.0)),
             },
             camera: WorldPosition {
                 tile_map_x: AbsoluteTile::from_chunk_offset(

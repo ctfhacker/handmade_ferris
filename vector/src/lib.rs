@@ -13,7 +13,7 @@ pub struct Vector2<T: Clone + Copy> {
     pub y: T,
 }
 
-impl<T: Clone + Copy + Mul<Output = T>> Vector2<T> {
+impl<T: Clone + Copy + Mul<Output = T> + Add<Output = T>> Vector2<T> {
     /// Create a new [`Vector2`]
     pub fn new(x: T, y: T) -> Self {
         Self { x, y }
@@ -25,6 +25,11 @@ impl<T: Clone + Copy + Mul<Output = T>> Vector2<T> {
             x: self.x.into(),
             y: self.y.into(),
         }
+    }
+
+    /// Get the dot product of two Vector2
+    pub fn dot(&self, other: Self) -> T {
+        self.x * other.x + self.y * other.y
     }
 }
 

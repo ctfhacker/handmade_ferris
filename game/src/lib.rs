@@ -397,7 +397,8 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         acceleration *= one_div_sqrt_2;
     }
 
-    let player_speed = Meters::new(10.0);
+    // Start the player speed
+    let player_speed = Meters::new(18.0);
     acceleration *= player_speed;
 
     // ODE here!
@@ -453,7 +454,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Check that the potential moved to tile is valid (aka, zero)
     let mut valid = true;
 
-    // Handle the tile type
+    // Get the tile type for the destination tile
     let next_tile = tile_map.get_tile_at(offset);
 
     // Block movement to walls
@@ -473,6 +474,26 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     if valid {
         state.player.position = new_player;
     } else {
+        // Hit an object/wall
+        let mut reflection = Vector2::new(Meters::new(0.0), Meters::new(0.0));
+
+        if old_player.tile_map_x.into_chunk().offset < new_player.tile_map_x.into_chunk().offset {
+            // PlayerDirection::Left
+            reflection = Vector2::new(Meters::new(1.0), Meters::new(0.0));
+
+        }
+        if old_player.tile_map_x.into_chunk().offset > new_player.tile_map_x.into_chunk().offset {
+            // PlayerDirection::Right
+            reflection = Vector2::new(Meters::new(-1.0), Meters::new(0.0));
+        }
+        if old_player.tile_map_y.into_chunk().offset > new_player.tile_map_y.into_chunk().offset {
+            // PlayerDirection::Back
+            reflection = Vector2::new(Meters::new(0.0), Meters::new(1.0));
+        }
+        if old_player.tile_map_y.into_chunk().offset < new_player.tile_map_y.into_chunk().offset {
+            // PlayerDirection::Front
+            reflection = Vector2::new(Meters::new(0.0), Meters::new(-1.0));
+        }
 
         // Reset the coordinates for places where the player cannot move
         let ChunkVector {
@@ -482,46 +503,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
         // Use the original player's position since the new position is invalid
         tile_center.x = f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH);
-        tile_center.y =
-            display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT);
-
-
-        // Move the player against the barrier if the player is not already at a
-        // tile's limit, but is against a wall
-        //
-        // Example: Player is moving to the right at a speed that would put
-        //          the player beyond a wall. Instead of leaving the player
-        //          where they were, move them to the wall
-        //
-        // Old Position:        New Position:
-        // +--------+##         +--------+##
-        // |        |##         |        |##
-        // | P      |## X       |       P|## NEWPOS
-        // |        |##         |        |##
-        // +--------+##         +--------+##
-        /*
-        // Make the old_player mutable
-        let mut old_player = old_player;
-
-        match state.player.direction {
-            PlayerDirection::Front => {
-                old_player.tile_rel.y = Meters::new(-0.35);
-            }
-            PlayerDirection::Back => {
-                old_player.tile_rel.y = Meters::new(0.35);
-            }
-            PlayerDirection::Right => {
-                old_player.tile_rel.x = Meters::new(0.35);
-            }
-            PlayerDirection::Left => {
-                old_player.tile_rel.x = Meters::new(-0.35);
-            }
-        }
-        */
-
-        // Update the player tile_rel in case the player's relative position changed
-        // (like moving them into a barrier)
-        state.player.position.tile_rel = old_player.tile_rel;
+        tile_center.y = display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT);
 
         // Use the original player's position since the new position is invalid
         player_bottom_center = Vector2::new(
@@ -529,8 +511,21 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
             tile_center.y - *old_player.tile_rel.y.into_pixels(),
         );
 
-        // Stop the velocity if we hit a wall
-        state.player.velocity = Vector2::new(Meters::new(0.0), Meters::new(0.0));
+        // Depending on the behavior we want, do we bounce off walls or grind into them?
+        #[allow(dead_code)]
+        enum WallReaction {
+            Grind = 1,
+            Bounce = 2,
+        }
+
+        let wall_reaction = WallReaction::Grind;
+        let reaction_const = f32::from(wall_reaction as u8);
+
+        // Bounce off the wall 
+        // Day 044: 37:56 - v' = v - 2 * dot(v, reflection) * reflection
+        let old_v = state.player.velocity;
+        state.player.velocity = old_v
+            - reflection * old_v.dot(reflection) * Meters::new(reaction_const);
     }
 
     let tile_half = Vector2::new(f32::from(TILE_HALF_WIDTH), f32::from(TILE_HALF_HEIGHT));

@@ -39,3 +39,6 @@ day given.
 
 ![Day039](./progress_pics/day039.png)
 
+### Day 044
+
+![Day044](./progress_pics/liveloop_day044.webm)

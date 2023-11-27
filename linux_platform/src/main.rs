@@ -3,11 +3,12 @@
 #![feature(variant_count)]
 
 use core::mem::variant_count;
+use std::io::{Read, Write};
 
 mod dl;
 use game_state::MILLISECONDS_PER_FRAME;
 use game_state::{BitmapAsset, Button, Game, Memory, GAME_WINDOW_HEIGHT, GAME_WINDOW_WIDTH};
-use game_state::{PlayerBitmap, PlayerDirection};
+use game_state::{PlayerBitmap, PlayerDirection, MEMORY_LENGTH, STATE_SIZE};
 
 use vector::Vector2;
 
@@ -34,6 +35,126 @@ macro_rules! load_asset {
             Vector2::new(73.0, 174.0),
         );
     };
+}
+
+/// The state of a looping input
+struct LoopState {
+    /// The state of the game at the start of the loop
+    game_state: game_state::State,
+
+    /// The state of memory to start the loop
+    memory: Vec<u8>,
+
+    /// The index for the next input buttons
+    input_index: usize,
+
+    /// The button sequence of the loop
+    buttons: Vec<[bool; variant_count::<Button>()]>,
+}
+
+impl LoopState {
+    pub fn next_input(&mut self) -> [bool; variant_count::<Button>()] {
+        let index = self.input_index;
+        self.input_index = (self.input_index + 1) % self.buttons.len();
+        self.buttons[index]
+    }
+
+    pub fn write_to_disk(&self, filename: &str) {
+        // Open the file to write
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(filename)
+            .expect("Failed to open loop state file");
+
+        // Write the data slice to the file
+        let game_state_bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&self.game_state as *const game_state::State) as *const u8,
+                STATE_SIZE,
+            )
+        };
+        file.write(&game_state_bytes).unwrap();
+
+        // Write the data len to the file
+        // [ len u64 ][ memory bytes]
+        let data_len = self.memory.len() as u64;
+        file.write(&data_len.to_le_bytes()).unwrap();
+        assert!(self.memory.len() == MEMORY_LENGTH);
+        file.write(self.memory.as_slice()).unwrap();
+
+        // Write the buttons to the file
+        // [ len u64 ][ button bytes]
+        let num_buttons = self.buttons.len() as u64;
+        file.write(&num_buttons.to_le_bytes()).unwrap();
+
+        for buttons in &self.buttons {
+            for button in buttons {
+                file.write(&[*button as u8]).unwrap();
+            }
+        }
+    }
+
+    // Read a saved loop from disk
+    pub fn read_from_disk(&self, filename: &str) -> Self {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .open(filename)
+            .expect("Failed to open loop state file");
+
+        // Read the game state from the file
+        let mut game_state_data = [0u8; STATE_SIZE];
+        file.read(&mut game_state_data)
+            .expect("Failed to read loop game state");
+        let game_state = unsafe { *game_state_data.as_ptr().cast::<game_state::State>() };
+
+        // Read the memory length
+        let mut memory_len = [0u8; 8];
+        file.read(&mut memory_len)
+            .expect("Failed to read size of loop memory");
+        let memory_len = u64::from_le_bytes(memory_len);
+        assert!(
+            memory_len as usize == MEMORY_LENGTH,
+            "Looping memory different than game memory"
+        );
+
+        // Read the memory bytes from disk
+        let mut memory = vec![0u8; memory_len as usize];
+        file.read(memory.as_mut_slice())
+            .expect("Failed to read loop memory");
+
+        // Read the number of buttons
+        let mut num_buttons = [0u8; 8];
+        file.read(&mut num_buttons)
+            .expect("Failed to read number of loop buttons");
+        let num_buttons = u64::from_le_bytes(num_buttons);
+
+        // Read the buttons from the file
+        let mut buttons = vec![[false; variant_count::<Button>()]; num_buttons as usize];
+        for curr_buttons in buttons.iter_mut() {
+            let mut tmp_buttons = [0u8; 6];
+            file.read(&mut tmp_buttons)
+                .expect("Failed to read loop buttons");
+
+            tmp_buttons
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, x)| curr_buttons[i] = *x != 0);
+        }
+
+        Self {
+            game_state,
+            memory,
+            input_index: 0,
+            buttons,
+        }
+    }
+}
+
+enum GameplayState {
+    Normal,
+    LoopRecording,
+    LoopPlayback,
 }
 
 fn main() {
@@ -84,6 +205,15 @@ fn main() {
         .expect("Failed to read background asset");
     let background = BitmapAsset::from_data(&background);
 
+    let mut looping = GameplayState::Normal;
+
+    let mut looping_state = LoopState {
+        game_state: state.clone(),
+        memory: Vec::new(),
+        buttons: Vec::with_capacity(256),
+        input_index: 0,
+    };
+
     // Main event loop
     for frame in 0.. {
         // Begin the timer for this loop iteration
@@ -120,6 +250,46 @@ fn main() {
                     'd' => Some(Button::Right),
                     'n' => Some(Button::DecreaseSpeed),
                     'm' => Some(Button::IncreaseSpeed),
+                    'p' => {
+                        looping_state = looping_state.read_from_disk("loop.hmi");
+                        looping = GameplayState::LoopPlayback;
+                        None
+                    }
+                    'l' => {
+                        match looping {
+                            GameplayState::Normal => {
+                                println!("Loop: recording..");
+
+                                // Initialize the loop state
+                                looping_state = LoopState {
+                                    game_state: state.clone(),
+                                    memory: memory.data_as_vec(),
+                                    buttons: Vec::with_capacity(256),
+                                    input_index: 0,
+                                };
+
+                                // Goto the recording state
+                                looping = GameplayState::LoopRecording;
+                            }
+                            GameplayState::LoopRecording => {
+                                // Goto the playback state
+                                println!("Loop: playback..");
+
+                                looping_state.write_to_disk("loop.hmi");
+                                looping_state = looping_state.read_from_disk("loop.hmi");
+
+                                looping = GameplayState::LoopPlayback;
+                            }
+                            GameplayState::LoopPlayback => {
+                                // Goto the normal state
+                                println!("Loop: stop..");
+                                looping = GameplayState::Normal;
+                                buttons = [false; variant_count::<Button>()];
+                            }
+                        }
+
+                        None
+                    }
                     _ => None,
                 };
 
@@ -134,12 +304,42 @@ fn main() {
         }
 
         // Debug print the frames per second
+        /*
         if frame > 0 && frame % 120 == 0 {
             println!(
                 "Frames: {} Frames/sec: {:6.2}",
                 frame,
                 f64::from(frame) / time_begin.elapsed().as_secs_f64()
             );
+        }
+        */
+
+        match looping {
+            GameplayState::LoopRecording => {
+                looping_state.buttons.push(buttons.clone());
+            }
+            GameplayState::LoopPlayback => {
+                // If at the beginning of the loop, reset the memory
+                if looping_state.input_index == 0 {
+                    println!("Loop reset..");
+
+                    unsafe {
+                        std::ptr::copy(
+                            looping_state.memory.as_ptr(),
+                            memory.data,
+                            looping_state.memory.len(),
+                        );
+                    }
+
+                    // Reset the game state
+                    state = looping_state.game_state.clone();
+                }
+
+                buttons = looping_state.next_input();
+            }
+            GameplayState::Normal => {
+                // Nothing to do, game play as normal
+            }
         }
 
         // Prepare the game state for the game logic

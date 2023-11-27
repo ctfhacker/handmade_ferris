@@ -1,7 +1,7 @@
 //! Implementation of <https://github.com/eqv/rand_romu>
 
 /// Implementation of `RandRomu`
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Rng {
     /// X state
     xstate: u64,
@@ -55,7 +55,7 @@ impl Lehmer64 {
     /// Create a new [`Lehmer64`] rng seeded by `rdtsc`
     pub fn new() -> Lehmer64 {
         let mut res = Lehmer64 {
-            value: u128::from(unsafe { core::arch::x86_64::_rdtsc() })
+            value: u128::from(unsafe { core::arch::x86_64::_rdtsc() }),
         };
 
         // Cycle through to create some chaos
@@ -77,20 +77,20 @@ impl Lehmer64 {
 #[macro_export]
 macro_rules! random_enum {
     ( /* Match case */
-        $(#[$attr:meta])* 
-        pub enum $name:ident { 
-            $( 
+        $(#[$attr:meta])*
+        pub enum $name:ident {
+            $(
                 $(#[$inner:ident $($args:tt)*])*
                 $field_vis:vis $variant:ident,
-            )* $(,)? 
+            )* $(,)?
         }
     ) => {
         $(#[$attr])*
-        pub enum $name { 
+        pub enum $name {
             $(
                 $(#[$inner $($args)*])*
                 $field_vis $variant,
-            )* 
+            )*
         }
 
         impl $name {
@@ -109,21 +109,21 @@ macro_rules! random_enum {
         }
     };
 
-    (   
-        $(#[$attr:meta])* 
-        pub enum $name:ident { 
-            $( 
+    (
+        $(#[$attr:meta])*
+        pub enum $name:ident {
+            $(
                 $(#[$inner:ident $($args:tt)*])*
                 $field_vis:vis $variant:ident = $val:expr,
-            )* $(,)? 
+            )* $(,)?
         }
     ) => {
         $(#[$attr])*
-        pub enum $name { 
+        pub enum $name {
             $(
                 $(#[$inner $($args)*])*
                 $field_vis $variant = $val,
-            )* 
+            )*
         }
 
         impl $name {

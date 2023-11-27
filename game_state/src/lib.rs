@@ -3,6 +3,8 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(variant_count)]
 
+use serde::{Deserialize, Serialize};
+
 use std::mem::variant_count;
 use std::ops::AddAssign;
 
@@ -10,6 +12,9 @@ mod rng;
 pub use rng::Rng;
 
 use vector::Vector2;
+
+mod memory;
+pub use memory::{Memory, MEMORY_BASE_ADDR, MEMORY_LENGTH};
 
 /// Number of COLUMNS in the tile map
 pub const TILE_MAP_COLUMNS: usize = 16;
@@ -78,6 +83,9 @@ pub const PIXELS_PER_METER: PixelsPerMeter =
 /// Acutally do want this to truncate
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub const MILLISECONDS_PER_FRAME: f32 = 1.0 / TARGET_FRAMES_PER_SECOND * 1000.;
+
+/// Size (in bytes) of the State struct
+pub const STATE_SIZE: usize = std::mem::size_of::<State>();
 
 /// Provides the `truncate` trait for rounding `f32` to `u32`
 pub trait Truncate {
@@ -528,7 +536,7 @@ impl PixelsPerMeter {
 }
 
 /// A player in the game
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Player {
     /// World position of the player
     pub position: WorldPosition,
@@ -541,7 +549,7 @@ pub struct Player {
 }
 
 /// Game state
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct State {
     /// Player in the game
     pub player: Player,
@@ -782,7 +790,7 @@ impl WorldPosition {
 }
 
 /// Direction to move the player
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Button {
     /// Move up
     Up = 0,
@@ -817,57 +825,6 @@ impl Button {
         ];
 
         VALS[val]
-    }
-}
-
-/// Memory chunk allocated for the game with a basic bump allocator
-pub struct Memory {
-    /// Has this memory been initialized by the game yet
-    pub initialized: bool,
-
-    /// Data bytes for this memory, allocated by the platform
-    pub data: Vec<u8>,
-
-    /// Size of the data allocation
-    pub data_len: usize,
-
-    /// Offset to the next allocation in the memory region
-    pub next_allocation: usize,
-}
-
-impl Memory {
-    /// Allocate a new chunk of memory
-    pub fn new(size: usize) -> Self {
-        Self {
-            initialized: false,
-            data: Vec::with_capacity(size),
-            data_len: size,
-            next_allocation: 0,
-        }
-    }
-
-    /// Allocate `T` in the allocated game memory
-    ///
-    /// # Panics
-    ///
-    /// * Out of allocated memory
-    pub fn alloc<T: Sized>(&mut self) -> *mut T {
-        assert!(
-            self.next_allocation + std::mem::size_of::<T>() < self.data_len,
-            "Out of game memory"
-        );
-
-        // Get the resulting address
-        let result = unsafe { self.data.as_mut_ptr().add(self.next_allocation) };
-
-        // Bump the allocation to fit the requested type
-        self.next_allocation += std::mem::size_of::<T>();
-
-        // 64 bit align the next allocation
-        self.next_allocation = (self.next_allocation + 0xf) & !0xf;
-
-        // Return the pointer to the allocation
-        result.cast::<T>()
     }
 }
 

@@ -344,7 +344,6 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         &mut *(game
             .memory
             .data
-            .as_mut_ptr()
             .cast::<World<TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
     };
 

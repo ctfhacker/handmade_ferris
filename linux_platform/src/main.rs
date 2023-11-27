@@ -251,11 +251,13 @@ fn main() {
                     'n' => Some(Button::DecreaseSpeed),
                     'm' => Some(Button::IncreaseSpeed),
                     'p' => {
+                        // Play a recording from disk
                         looping_state = looping_state.read_from_disk("loop.hmi");
                         looping = GameplayState::LoopPlayback;
                         None
                     }
                     'l' => {
+                        // Normal -> Recording -> Playback -> Normal
                         match looping {
                             GameplayState::Normal => {
                                 println!("Loop: recording..");
@@ -304,7 +306,6 @@ fn main() {
         }
 
         // Debug print the frames per second
-        /*
         if frame > 0 && frame % 120 == 0 {
             println!(
                 "Frames: {} Frames/sec: {:6.2}",
@@ -312,7 +313,6 @@ fn main() {
                 f64::from(frame) / time_begin.elapsed().as_secs_f64()
             );
         }
-        */
 
         match looping {
             GameplayState::LoopRecording => {

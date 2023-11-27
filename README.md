@@ -41,4 +41,4 @@ day given.
 
 ### Day 044
 
-./progress_pics/day044.mp4
+https://github.com/ctfhacker/handmade_ferris/assets/7690115/d1b23b7d-750b-403b-b393-7b8d8c4d9d28

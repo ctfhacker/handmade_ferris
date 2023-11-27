@@ -3,8 +3,6 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(variant_count)]
 
-use serde::{Deserialize, Serialize};
-
 use std::mem::variant_count;
 use std::ops::AddAssign;
 
@@ -790,7 +788,7 @@ impl WorldPosition {
 }
 
 /// Direction to move the player
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Button {
     /// Move up
     Up = 0,
@@ -948,7 +946,7 @@ impl Color {
         blue: Blue::new(0.),
         alpha: Alpha::new(0.),
     };
-    /// The color white
+    /// The color grey
     #[allow(dead_code)]
     pub const GREY: Color = Color {
         red: Red::new(0.5),

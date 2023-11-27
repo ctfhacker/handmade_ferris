@@ -333,6 +333,46 @@ pub extern "C" fn game_update_and_render(game: &mut Game, state: &mut State) {
     game.error = res;
 }
 
+fn draw_buttons(game: &mut Game) -> Result<()> {
+    // Draw UP
+    draw_rectangle(
+        game,
+        if game.buttons[Button::Up as usize] { &Color::BLUE } else { &Color::GREY },
+        Vector2::new(20.0, 10.0),
+        15.0,
+        15.0
+    )?;
+
+    // Draw DOWN
+    draw_rectangle(
+        game,
+        if game.buttons[Button::Down as usize] { &Color::BLUE } else { &Color::GREY },
+        Vector2::new(20.0, 40.0),
+        15.0,
+        15.0
+    )?;
+
+    // Draw LEFT
+    draw_rectangle(
+        game,
+        if game.buttons[Button::Left as usize] { &Color::BLUE } else { &Color::GREY },
+        Vector2::new(05.0, 25.0),
+        15.0,
+        15.0
+    )?;
+
+    // Draw RIGHT
+    draw_rectangle(
+        game,
+        if game.buttons[Button::Right as usize] { &Color::BLUE } else { &Color::GREY },
+        Vector2::new(35.0, 25.0),
+        15.0,
+        15.0
+    )?;
+
+    Ok(())
+}
+
 /// Actual game logic code that can return a [`Result`]
 fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Draw the background
@@ -548,6 +588,9 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     // DEBUG draw the player bottom center
     draw_rectangle(game, &Color::RED, player_bottom_center - 2.0, 4.0, 4.0)?;
+
+    // DEBUG draw buttons
+    draw_buttons(game)?;
 
     Ok(())
 }

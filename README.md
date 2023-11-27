@@ -41,4 +41,4 @@ day given.
 
 ### Day 044
 
-![Day044](./progress_pics/liveloop_day044.webm)
+./progress_pics/day044.mp4

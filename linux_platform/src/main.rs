@@ -304,15 +304,13 @@ fn main() {
         }
 
         // Debug print the frames per second
-        /*
-        if frame > 0 && frame % 120 == 0 {
+        if frame > 0 && frame % 60 == 0 {
             println!(
                 "Frames: {} Frames/sec: {:6.2}",
                 frame,
                 f64::from(frame) / time_begin.elapsed().as_secs_f64()
             );
         }
-        */
 
         match looping {
             GameplayState::LoopRecording => {

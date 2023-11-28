@@ -393,8 +393,10 @@ impl From<f32> for Meters {
 
 /// Typed `f32` representing number of meters.
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
 pub struct Meters(f32);
+
+impl vector::Primitive for Meters {}
 
 impl Meters {
     /// Create a new meters
@@ -494,6 +496,12 @@ impl From<Meters> for f32 {
     }
 }
 
+impl From<Meters> for f64 {
+    fn from(val: Meters) -> f64 {
+        val.into()
+    }
+}
+
 /// Typed `f32` representing number of pixels
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
@@ -536,8 +544,8 @@ impl PixelsPerMeter {
 }
 
 /// A player in the game
-#[derive(Debug, Clone, Copy)]
-pub struct Player {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Entity {
     /// World position of the player
     pub position: WorldPosition,
 
@@ -548,17 +556,47 @@ pub struct Player {
     pub velocity: Vector2<Meters>,
 }
 
+impl Entity {
+    pub fn init_as_player(&mut self) {
+        // Reset the entity
+        *self = Self::default();
+
+        self.position = WorldPosition {
+            tile_map_x: AbsoluteTile::from_chunk_offset(0, 5),
+            tile_map_y: AbsoluteTile::from_chunk_offset(0, 6),
+            z: 0,
+            tile_rel: Vector2::new(Meters::new(0.0), Meters::new(0.0)),
+        };
+        self.direction = PlayerDirection::Front;
+        self.velocity = Vector2::new(Meters::new(0.0), Meters::new(0.0));
+    }
+}
+
+const ENTITY_COUNT: usize = 256;
+
 /// Game state
 #[derive(Debug, Clone, Copy)]
 pub struct State {
-    /// Player in the game
-    pub player: Player,
+    /// Flags for which entity in the entity array is alive
+    pub entity_alive: [bool; ENTITY_COUNT],
+
+    /// Entities in the game
+    pub entities: [Entity; ENTITY_COUNT],
+
+    /// The next slot to allocate an entity
+    pub next_entity: usize,
+
+    /// The entity for the camera to follow
+    pub camera_following_entity: usize,
 
     /// Camera position to known where to draw the current screen
     pub camera: WorldPosition,
 
     /// Random number generator
     pub rng: Rng,
+
+    /// Number of players in the game
+    pub num_players: u32,
 }
 
 impl State {
@@ -569,16 +607,11 @@ impl State {
     /// If the screen center row or column doesn't fit in a u32 -- o.0
     pub fn reset() -> Self {
         Self {
-            player: Player {
-                position: WorldPosition {
-                    tile_map_x: AbsoluteTile::from_chunk_offset(0, 5),
-                    tile_map_y: AbsoluteTile::from_chunk_offset(0, 6),
-                    z: 0,
-                    tile_rel: Vector2::new(Meters::new(0.0), Meters::new(0.0)),
-                },
-                direction: PlayerDirection::Front,
-                velocity: Vector2::new(Meters::new(0.0), Meters::new(0.0)),
-            },
+            entity_alive: [false; 256],
+            entities: [Entity::default(); 256],
+            next_entity: 0,
+            num_players: 0,
+            camera_following_entity: 0,
             camera: WorldPosition {
                 tile_map_x: AbsoluteTile::from_chunk_offset(
                     0,
@@ -593,6 +626,31 @@ impl State {
             },
             rng: Rng::new(),
         }
+    }
+
+    /// Add a player to the game
+    pub fn add_player(&mut self) {
+        let player_index = self.allocate_entity();
+        self.num_players += 1;
+        self.entities[player_index].init_as_player();
+
+        // Always follow the first player
+        if self.num_players == 1 {
+            self.camera_following_entity = player_index;
+        }
+    }
+
+    /// Get the index of the an allocated entity from the entity list
+    pub fn allocate_entity(&mut self) -> usize {
+        let res = self.next_entity;
+        self.entity_alive[res] = true;
+        self.next_entity += 1;
+        res
+    }
+
+    /// Set the camera to the entity the camera is following
+    pub fn set_camera(&mut self) {
+        self.camera = self.entities[self.camera_following_entity].position;
     }
 }
 
@@ -616,7 +674,7 @@ pub struct ChunkVector {
 }
 
 /// An absolute tile location in the world, constrained to only be [`0`, `MAX`) in value.
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Default)]
 #[repr(transparent)]
 pub struct AbsoluteTile<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>(u32);
 
@@ -718,7 +776,7 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> From<Chunk>
 ///
 /// The [`AbsoluteTile`] contains the `chunk` and specific tile in the chunk itself, while
 /// the `tile_rel_*` contains the relative offset the entity is within
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Default)]
 pub struct WorldPosition {
     /// The x coordinate in the world
     pub tile_map_x: AbsoluteTile<MAX_NUM_CHUNKS, TILE_MAP_COLUMNS>,
@@ -786,6 +844,40 @@ impl WorldPosition {
         let offset = Vector2::new(x_offset, y_offset);
 
         ChunkVector { chunk_id, offset }
+    }
+
+    pub fn tile_center(&self) -> Vector2<f32> {
+        let ChunkVector {
+            chunk_id: _,
+            offset,
+        } = self.into_chunk();
+
+        let display_lower_left_y = f32::from(GAME_WINDOW_HEIGHT);
+
+        Vector2::new(
+            f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH),
+            display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT),
+        )
+    }
+
+    pub fn bottom_center(&self) -> Vector2<f32> {
+        // Reset the coordinates for places where the player cannot move
+        let ChunkVector {
+            chunk_id: _,
+            offset,
+        } = self.into_chunk();
+
+        let display_lower_left_y = f32::from(GAME_WINDOW_HEIGHT);
+
+        // Use the original player's position since the new position is invalid
+        let tile_center_x = f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH);
+        let tile_center_y =
+            display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT);
+
+        Vector2::new(
+            tile_center_x + *self.tile_rel.x.into_pixels(),
+            tile_center_y - *self.tile_rel.y.into_pixels(),
+        )
     }
 }
 
@@ -1016,9 +1108,10 @@ impl From<u32> for Color {
 }
 
 /// The direction the player is currently facing
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub enum PlayerDirection {
     /// Player is facing front
+    #[default]
     Front,
 
     /// Player is facing back

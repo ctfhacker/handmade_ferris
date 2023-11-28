@@ -7,7 +7,7 @@ use std::ops::Neg;
 
 use game_state::{BitmapAsset, Button, Memory, Meters, TILE_MAP_COLUMNS, TILE_MAP_ROWS, MILLISECONDS_PER_FRAME};
 use game_state::{ChunkVector, Error, Game, Result, Rng, State};
-use game_state::{Color, PlayerDirection, Truncate, GAME_WINDOW_HEIGHT};
+use game_state::{Color, PlayerDirection, Truncate, Entity};
 use game_state::{TILE_HALF_HEIGHT, TILE_HALF_WIDTH, TILE_HEIGHT, TILE_WIDTH};
 
 use vector::Vector2;
@@ -215,6 +215,24 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
     /// # Panics
     ///
     /// * Sanity check of indexes is out of sync
+    pub fn draw_tilemap_at_camera(
+        &mut self,
+        game: &mut Game, 
+        state: &mut State        
+    ) -> Result<()> {
+        state.set_camera();
+
+        let ChunkVector { chunk_id, offset: _ } = state.camera.into_chunk();
+        let tile_map = self.get_tilemap_at(chunk_id, state.camera.z, &mut game.memory, &mut state.rng);
+        tile_map.draw(game)
+    }
+
+    /// Get the [`TileMap`] at (`x`, `y`) in the World or allocate a new [`TileMap`] if
+    /// the requested location is not yet allocated.
+    ///
+    /// # Panics
+    ///
+    /// * Sanity check of indexes is out of sync
     pub fn get_tilemap_at(
         &mut self,
         pos: Vector2<u32>,
@@ -338,6 +356,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
     // Draw the background
     game.background.draw(game, Vector2::new(0., 0.));
 
+
     // Get the world structure which is always at the beginning of the persistent memory
     let world = unsafe {
         #[allow(clippy::cast_ptr_alignment)]
@@ -347,207 +366,85 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
             .cast::<World<TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
     };
 
-    let old_player = state.player.position;
+    // Draw the tile map where the camera is facing
+    world.draw_tilemap_at_camera(game, state)?;
+    
+    for entity_index in 0..state.next_entity {
+        let entity_alive = state.entity_alive[entity_index];
 
-    // let mut movement_delta = Vector2::new(Meters::new(0.), Meters::new(0.));
-    let mut acceleration = Vector2::new(Meters::new(0.), Meters::new(0.));
-
-    for (button_id, is_pressed) in game.buttons.as_ref().iter().enumerate() {
-        // Not pressed, ignore the button
-        if !is_pressed {
-            continue;
+        // No need to handle this entity since it isn't alive
+        if !entity_alive { 
+            continue; 
         }
 
-        // Get the pressed button
-        let button = Button::from_usize(button_id);
+        // Get the current alive entity
+        let entity = unsafe { state.entities.get_unchecked_mut(entity_index) };
 
-        // Based on the button pressed, move the player
-        match button {
-            Button::Up => {
-                acceleration.y = Meters::new(1.0);
-                state.player.direction = PlayerDirection::Back;
+        // let mut movement_delta = Vector2::new(Meters::new(0.), Meters::new(0.));
+        let mut acceleration = Vector2::new(Meters::new(0.), Meters::new(0.));
+
+        for (button_id, is_pressed) in game.buttons.as_ref().iter().enumerate() {
+            // Not pressed, ignore the button
+            if !is_pressed {
+                continue;
             }
-            Button::Down => {
-                acceleration.y = Meters::new(-1.0);
-                state.player.direction = PlayerDirection::Front;
-            }
-            Button::Right => {
-                acceleration.x = Meters::new(1.0);
-                state.player.direction = PlayerDirection::Right;
-            }
-            Button::Left => {
-                acceleration.x = Meters::new(-1.0);
-                state.player.direction = PlayerDirection::Left;
-            }
-            Button::DecreaseSpeed => {
-                acceleration *= Meters::new(0.5);
-            }
-            Button::IncreaseSpeed => {
-                acceleration *= Meters::new(10.0);
+
+            // Get the pressed button
+            let button = Button::from_usize(button_id);
+
+            // Based on the button pressed, move the player
+            match button {
+                Button::Up => {
+                    acceleration.y = Meters::new(1.0);
+                    entity.direction = PlayerDirection::Back;
+                }
+                Button::Down => {
+                    acceleration.y = Meters::new(-1.0);
+                    entity.direction = PlayerDirection::Front;
+                }
+                Button::Right => {
+                    acceleration.x = Meters::new(1.0);
+                    entity.direction = PlayerDirection::Right;
+                }
+                Button::Left => {
+                    acceleration.x = Meters::new(-1.0);
+                    entity.direction = PlayerDirection::Left;
+                }
+                Button::DecreaseSpeed => {
+                    acceleration *= Meters::new(0.5);
+                }
+                Button::IncreaseSpeed => {
+                    acceleration *= Meters::new(10.0);
+                }
             }
         }
+
+        // Move the entity based on the acceleration
+        move_entity(entity_index, world, game, state, acceleration);
+       
+        let tile_half = Vector2::new(f32::from(TILE_HALF_WIDTH), f32::from(TILE_HALF_HEIGHT));
+  
+        // DEBUG player position
+        let entity = unsafe { state.entities.get_unchecked_mut(entity_index) };
+        draw_rectangle(
+            game,
+            &Color::BLACK,
+            entity.position.tile_center() - tile_half,
+            f32::from(TILE_WIDTH),
+            f32::from(TILE_HEIGHT),
+        )?;
+
+        // Get the player bitmap for the direction they are currently facing
+        let player_asset = game.player_assets[entity.direction as usize];
+
+        let position = entity.position.bottom_center() - player_asset.merge_point;
+        player_asset.head.draw(game, position);
+        player_asset.torso.draw(game, position);
+        player_asset.cape.draw(game, position);
+
+        // DEBUG draw the player bottom center
+        draw_rectangle(game, &Color::RED, entity.position.bottom_center() - 2.0, 4.0, 4.0)?;
     }
-
-    // If moving along a diagonal, do pythagorean theorem to get the diagonal
-    // distance and not strictly the sum of both x and y.
-    if acceleration.x != Meters::new(0.0) && acceleration.y != Meters::new(0.0) {
-        // 1/sqrt(2)
-        let one_div_sqrt_2 = Meters::new(std::f32::consts::FRAC_1_SQRT_2);
-        acceleration *= one_div_sqrt_2;
-    }
-
-    // Start the player speed
-    let player_speed = Meters::new(18.0);
-    acceleration *= player_speed;
-
-    // ODE here!
-    // Add a pseudo-friction force here
-    let friction_const = 1.0.into();
-    acceleration += state.player.velocity.neg() * friction_const;
-
-    // Derived in Day 043
-    // a - Acceleration | v - Velocity | p - Position
-    // new_position     = 0.5*a*t^2 + v*t + p
-    // new_velocity     = at + v
-    // new_acceleration = a
-
-    // Move the player by delta based on the current key presses
-    let mut new_player = state.player.position;
-
-    // Use the new position equation above to calculate the new position
-    new_player.tile_rel = 
-        // 0.5 * a * t^2
-        acceleration * Meters::new(0.5) * world.delta_t.powi(2).into() 
-        // v * t
-        + state.player.velocity * world.delta_t
-        // p
-        + new_player.tile_rel;
-
-    // Use the velocity equation to calculate the new player velocity
-    state.player.velocity = acceleration * world.delta_t + state.player.velocity;
-
-    // Update the player coordinates based on the movement. If the player has stepped
-    // beyond the bounds of the current tile, update the position to the new tile.
-    new_player.canonicalize();
-    // dbg_hex!(new_player);
-
-    let ChunkVector { chunk_id, offset } = new_player.into_chunk();
-
-    let tile_map = world.get_tilemap_at(chunk_id, new_player.z, game.memory, &mut state.rng);
-
-    // Draw the tile map
-    tile_map.draw(game)?;
-
-    let display_lower_left_y = f32::from(GAME_WINDOW_HEIGHT);
-
-    let mut tile_center = Vector2::new(
-        f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH),
-        display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT),
-    );
-
-    let mut player_bottom_center = Vector2::new(
-        tile_center.x + *new_player.tile_rel.x.into_pixels(),
-        tile_center.y - *new_player.tile_rel.y.into_pixels(),
-    );
-
-    // Check that the potential moved to tile is valid (aka, zero)
-    let mut valid = true;
-
-    // Get the tile type for the destination tile
-    let next_tile = tile_map.get_tile_at(offset);
-
-    // Block movement to walls
-    if matches!(next_tile, &TileType::Wall) {
-        valid = false;
-    }
-
-    // Only go up/down a ladder if the player didn't originally come from a ladder
-    if matches!(next_tile, &TileType::Ladder)
-        && (new_player.tile_map_x != old_player.tile_map_x
-            || new_player.tile_map_y != old_player.tile_map_y)
-    {
-        new_player.z = (new_player.z + 1) % 2;
-    }
-
-    // If the move is valid, update the player
-    if valid {
-        state.player.position = new_player;
-    } else {
-        // Hit an object/wall
-        let mut reflection = Vector2::new(Meters::new(0.0), Meters::new(0.0));
-
-        if old_player.tile_map_x.into_chunk().offset < new_player.tile_map_x.into_chunk().offset {
-            // PlayerDirection::Left
-            reflection = Vector2::new(Meters::new(1.0), Meters::new(0.0));
-
-        }
-        if old_player.tile_map_x.into_chunk().offset > new_player.tile_map_x.into_chunk().offset {
-            // PlayerDirection::Right
-            reflection = Vector2::new(Meters::new(-1.0), Meters::new(0.0));
-        }
-        if old_player.tile_map_y.into_chunk().offset > new_player.tile_map_y.into_chunk().offset {
-            // PlayerDirection::Back
-            reflection = Vector2::new(Meters::new(0.0), Meters::new(1.0));
-        }
-        if old_player.tile_map_y.into_chunk().offset < new_player.tile_map_y.into_chunk().offset {
-            // PlayerDirection::Front
-            reflection = Vector2::new(Meters::new(0.0), Meters::new(-1.0));
-        }
-
-        // Reset the coordinates for places where the player cannot move
-        let ChunkVector {
-            chunk_id: _,
-            offset,
-        } = old_player.into_chunk();
-
-        // Use the original player's position since the new position is invalid
-        tile_center.x = f32::from(offset.x * TILE_WIDTH + TILE_HALF_WIDTH);
-        tile_center.y = display_lower_left_y - f32::from(offset.y * TILE_HEIGHT) - f32::from(TILE_HALF_HEIGHT);
-
-        // Use the original player's position since the new position is invalid
-        player_bottom_center = Vector2::new(
-            tile_center.x + *old_player.tile_rel.x.into_pixels(),
-            tile_center.y - *old_player.tile_rel.y.into_pixels(),
-        );
-
-        // Depending on the behavior we want, do we bounce off walls or grind into them?
-        #[allow(dead_code)]
-        enum WallReaction {
-            Grind = 1,
-            Bounce = 2,
-        }
-
-        let wall_reaction = WallReaction::Grind;
-        let reaction_const = f32::from(wall_reaction as u8);
-
-        // Bounce off the wall 
-        // Day 044: 37:56 - v' = v - 2 * dot(v, reflection) * reflection
-        let old_v = state.player.velocity;
-        state.player.velocity = old_v
-            - reflection * old_v.dot(reflection) * Meters::new(reaction_const);
-    }
-
-    let tile_half = Vector2::new(f32::from(TILE_HALF_WIDTH), f32::from(TILE_HALF_HEIGHT));
-
-    // DEBUG player position
-    draw_rectangle(
-        game,
-        &Color::BLACK,
-        tile_center - tile_half,
-        f32::from(TILE_WIDTH),
-        f32::from(TILE_HEIGHT),
-    )?;
-
-    // Get the player bitmap for the direction they are currently facing
-    let player_asset = game.player_assets[state.player.direction as usize];
-
-    let position = player_bottom_center - player_asset.merge_point;
-    player_asset.head.draw(game, position);
-    player_asset.torso.draw(game, position);
-    player_asset.cape.draw(game, position);
-
-    // DEBUG draw the player bottom center
-    draw_rectangle(game, &Color::RED, player_bottom_center - 2.0, 4.0, 4.0)?;
 
     Ok(())
 }
@@ -713,4 +610,128 @@ fn _draw_asset(game: &mut Game, asset: &BitmapAsset, pos_x: f32, pos_y: f32) -> 
 
     // Success!
     Ok(())
+}
+
+/// Move an entity based on the given acceleration
+pub fn move_entity<const W: usize, const H: usize>(
+        entity_index: usize, 
+        world: &mut World<W, H>, 
+        game: &mut Game, 
+        state: &mut State, 
+        mut acceleration: Vector2<Meters>) {
+    let entity = &mut state.entities[entity_index];
+
+    let old_player = entity.position;
+
+    // If moving along a diagonal, do pythagorean theorem to get the diagonal
+    // distance and not strictly the sum of both x and y.
+    if acceleration.x != Meters::new(0.0) && acceleration.y != Meters::new(0.0) {
+        // 1/sqrt(2)
+        let one_div_sqrt_2 = Meters::new(std::f32::consts::FRAC_1_SQRT_2);
+        acceleration *= one_div_sqrt_2;
+    }
+
+    // Start the player speed
+    let player_speed = Meters::new(18.0);
+    acceleration *= player_speed;
+
+    // ODE here!
+    // Add a pseudo-friction force here
+    let friction_const = 1.0.into();
+    acceleration += entity.velocity.neg() * friction_const;
+
+    // Derived in Day 043
+    // a - Acceleration | v - Velocity | p - Position
+    // new_position     = 0.5*a*t^2 + v*t + p
+    // new_velocity     = at + v
+    // new_acceleration = a
+
+    let mut new_player_pos = entity.position;
+    let move_delta = 
+        // 0.5 * a * t^2
+        acceleration * Meters::new(0.5) * world.delta_t.powi(2).into() 
+        // v * t
+        + entity.velocity * world.delta_t;
+
+    // Add the delta for the new position
+    new_player_pos.tile_rel += move_delta;
+
+    // Use the velocity equation to calculate the new player velocity
+    entity.velocity = acceleration * world.delta_t + entity.velocity;
+
+    // Update the player coordinates based on the movement. If the player has stepped
+    // beyond the bounds of the current tile, update the position to the new tile.
+    new_player_pos.canonicalize();
+    // dbg_hex!(new_player_pos);
+
+    let mut player_bottom_center = new_player_pos.bottom_center();
+
+    // Check that the potential moved to tile is valid (aka, zero)
+    let mut valid = true;
+
+    let ChunkVector { chunk_id, offset } = new_player_pos.into_chunk();
+
+    // Get the tile map this player is on
+    let tile_map = world.get_tilemap_at(chunk_id, new_player_pos.z, &mut game.memory, &mut state.rng);
+
+    // Get the tile type for the destination tile
+    let next_tile = tile_map.get_tile_at(offset);
+
+    // Block movement to walls
+    if matches!(next_tile, &TileType::Wall) {
+        valid = false;
+    }
+
+    // Only go up/down a ladder if the player didn't originally come from a ladder
+    if matches!(next_tile, &TileType::Ladder)
+        && (new_player_pos.tile_map_x != old_player.tile_map_x
+            || new_player_pos.tile_map_y != old_player.tile_map_y)
+    {
+        new_player_pos.z = (new_player_pos.z + 1) % 2;
+    }
+
+    // If the move is valid, update the player
+    if valid {
+        entity.position = new_player_pos;
+    } else {
+        // Hit an object/wall
+        let mut reflection = Vector2::new(Meters::new(0.0), Meters::new(0.0));
+
+        if old_player.tile_map_x.into_chunk().offset < new_player_pos.tile_map_x.into_chunk().offset {
+            // PlayerDirection::Left
+            reflection = Vector2::new(Meters::new(1.0), Meters::new(0.0));
+
+        }
+        if old_player.tile_map_x.into_chunk().offset > new_player_pos.tile_map_x.into_chunk().offset {
+            // PlayerDirection::Right
+            reflection = Vector2::new(Meters::new(-1.0), Meters::new(0.0));
+        }
+        if old_player.tile_map_y.into_chunk().offset > new_player_pos.tile_map_y.into_chunk().offset {
+            // PlayerDirection::Back
+            reflection = Vector2::new(Meters::new(0.0), Meters::new(1.0));
+        }
+        if old_player.tile_map_y.into_chunk().offset < new_player_pos.tile_map_y.into_chunk().offset {
+            // PlayerDirection::Front
+            reflection = Vector2::new(Meters::new(0.0), Meters::new(-1.0));
+        }
+
+        // Use the original player's position since the new position is invalid
+        player_bottom_center = old_player.bottom_center();
+
+        // Depending on the behavior we want, do we bounce off walls or grind into them?
+        #[allow(dead_code)]
+        enum WallReaction {
+            Grind = 1,
+            Bounce = 2,
+        }
+
+        let wall_reaction = WallReaction::Grind;
+        let reaction_const = f32::from(wall_reaction as u8);
+
+        // Bounce off the wall 
+        // Day 044: 37:56 - v' = v - 2 * dot(v, reflection) * reflection
+        let old_v = entity.velocity;
+        entity.velocity = old_v
+            - reflection * old_v.dot(reflection) * Meters::new(reaction_const);
+    }
 }

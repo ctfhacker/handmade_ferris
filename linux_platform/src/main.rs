@@ -182,6 +182,9 @@ fn main() {
     // Get the reset game state
     let mut state = game_state::State::reset();
 
+    // Add a player
+    state.add_player();
+
     // Current button states for the game
     let mut buttons = [false; variant_count::<Button>()];
 

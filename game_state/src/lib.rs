@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use std::cmp::{Ord, Ordering};
 use std::mem::variant_count;
 use std::ops::AddAssign;
 
@@ -14,7 +15,7 @@ pub use rng::Rng;
 use vector::Vector2;
 
 mod memory;
-pub use memory::{Memory, MEMORY_BASE_ADDR, MEMORY_LENGTH};
+pub use memory::{Allocation, Memory, MEMORY_BASE_ADDR, MEMORY_LENGTH};
 
 /// Number of COLUMNS in the tile map
 pub const TILE_MAP_COLUMNS: usize = 16;
@@ -413,6 +414,11 @@ impl Meters {
     pub fn into_pixels(&self) -> Pixels {
         Pixels(self.0 * PIXELS_PER_METER.0)
     }
+
+    /// Take the square root of the inner value
+    pub fn sqrt(&self) -> f32 {
+        self.0.sqrt()
+    }
 }
 
 impl std::ops::Deref for Meters {
@@ -674,7 +680,7 @@ pub struct ChunkVector {
 }
 
 /// An absolute tile location in the world, constrained to only be [`0`, `MAX`) in value.
-#[derive(Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, Default, Ord)]
 #[repr(transparent)]
 pub struct AbsoluteTile<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize>(u32);
 
@@ -759,6 +765,33 @@ impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> AbsoluteTile<MAX_CHUNK_
 
         // Re-write the modified chunk back
         *self = chunk.into();
+    }
+}
+
+impl<const MAX_CHUNK_ID: usize, const MAX_OFFSET: usize> std::cmp::PartialOrd
+    for AbsoluteTile<MAX_CHUNK_ID, MAX_OFFSET>
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let Chunk { chunk_id, offset } = self.into_chunk();
+
+        let Chunk {
+            chunk_id: other_chunk_id,
+            offset: other_offset,
+        } = other.into_chunk();
+
+        // First try to compare chunk ids directly
+
+        let result = if chunk_id - other_chunk_id < other_chunk_id - chunk_id {
+            Ordering::Less
+        } else if chunk_id - other_chunk_id > other_chunk_id - chunk_id {
+            Ordering::Greater
+        } else if chunk_id - other_chunk_id == other_chunk_id - chunk_id {
+            offset.cmp(&other_offset)
+        } else {
+            unreachable!()
+        };
+
+        Some(result)
     }
 }
 
@@ -878,6 +911,18 @@ impl WorldPosition {
             tile_center_x + *self.tile_rel.x.into_pixels(),
             tile_center_y - *self.tile_rel.y.into_pixels(),
         )
+    }
+
+    pub fn left_edge(&self) -> (Vector2<f32>, Vector2<f32>) {
+        let mut upper_left_corner = self.tile_center();
+        upper_left_corner.x -= f32::from(TILE_HALF_WIDTH);
+        upper_left_corner.y -= f32::from(TILE_HALF_HEIGHT);
+
+        let mut lower_left_corner = self.tile_center();
+        lower_left_corner.x -= f32::from(TILE_HALF_WIDTH);
+        lower_left_corner.y += f32::from(TILE_HALF_HEIGHT);
+
+        (upper_left_corner, lower_left_corner)
     }
 }
 
@@ -1046,6 +1091,14 @@ impl Color {
         red: Red::new(0.5),
         green: Green::new(0.5),
         blue: Blue::new(0.5),
+        alpha: Alpha::new(0.),
+    };
+    /// The color brown
+    #[allow(dead_code)]
+    pub const BROWN: Color = Color {
+        red: Red::new(100. / 256.),
+        green: Green::new(65. / 256.),
+        blue: Blue::new(23. / 256.),
         alpha: Alpha::new(0.),
     };
 

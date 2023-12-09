@@ -5,24 +5,21 @@
 
 use std::ops::Neg;
 
-use game_state::{BitmapAsset, Button, Memory, Meters, TILE_MAP_COLUMNS, TILE_MAP_ROWS, MILLISECONDS_PER_FRAME};
+use game_state::{BitmapAsset, Button, Memory, Meters, TILE_MAP_COLUMNS, TILE_MAP_ROWS, MILLISECONDS_PER_FRAME, MEMORY_BASE_ADDR};
 use game_state::{ChunkVector, Error, Game, Result, Rng, State};
-use game_state::{Color, PlayerDirection, Truncate, Entity};
+use game_state::{Color, PlayerDirection, Truncate};
 use game_state::{TILE_HALF_HEIGHT, TILE_HALF_WIDTH, TILE_HEIGHT, TILE_WIDTH};
+use game_state::Allocation;
 
 use vector::Vector2;
 
 /// Type of tiles that inhabit the world
-#[derive(Debug, Copy, Clone)]
 #[repr(u8)]
+#[derive(Debug, Copy, Clone, Default)]
 pub enum TileType {
-    /// Empty tile
+    #[default]
     Empty,
-
-    /// Wall tile
     Wall,
-
-    /// Ladder tile
     Ladder,
 }
 
@@ -59,9 +56,18 @@ macro_rules! dbg_hex {
 }
 
 /// Single chunk of tiles. A collection of these [`TileMap`] make up an entire [`World`]
+#[derive(Copy, Clone, Debug)]
 pub struct TileMap<const WIDTH: usize, const HEIGHT: usize> {
     /// Tile map data
     data: [[TileType; WIDTH]; HEIGHT],
+}
+
+impl<const WIDTH: usize, const HEIGHT: usize> std::default::Default for TileMap<WIDTH, HEIGHT> {
+    fn default() -> Self {
+        Self {
+            data: [[TileType::Empty; WIDTH]; HEIGHT]
+        }
+    }
 }
 
 impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
@@ -79,10 +85,10 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
         //    x0->
         let x = usize::from(pos.x);
         let y = HEIGHT - 1 - usize::from(pos.y);
-        assert!(x < WIDTH, "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
-        assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
 
-        unsafe { self.data.get_unchecked(y).get_unchecked(x) }
+        self.data
+            .get(y).unwrap_or_else(|| panic!("{:#x} larger than HEIGHT: {:#x}", y, HEIGHT))
+            .get(x).unwrap_or_else(|| panic!("{:#x} larger than WIDTH: {:#x}", x, WIDTH))
     }
 
     /// Draw the [`TileMap`] via the given [`Game`]
@@ -140,13 +146,12 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
         //    x0->
         let x = usize::from(x);
         let y = HEIGHT - 1 - usize::from(y);
-        assert!(x < WIDTH, "{:#x} larger than WIDTH: {:#x}", x, WIDTH);
-        assert!(y < HEIGHT, "{:#x} larger than HEIGHT: {:#x}", y, HEIGHT);
 
-        unsafe {
-            let ptr = self.data.get_unchecked_mut(y).get_unchecked_mut(x);
-            (*ptr) = val;
-        }
+        let ptr = self.data
+            .get_mut(y).unwrap_or_else(|| panic!("{:#x} larger than HEIGHT: {:#x}", y, HEIGHT))
+            .get_mut(x).unwrap_or_else(|| panic!("{:#x} larger than WIDTH: {:#x}", x, WIDTH));
+
+        *ptr = val;
     }
 }
 
@@ -154,7 +159,7 @@ impl<const WIDTH: usize, const HEIGHT: usize> TileMap<WIDTH, HEIGHT> {
 #[derive(Debug)]
 pub struct World<const WIDTH: usize, const HEIGHT: usize> {
     /// Tile maps in the world
-    tile_maps: [*mut TileMap<WIDTH, HEIGHT>; PREALLOC_TILE_MAPS],
+    tile_maps: [Allocation<TileMap<WIDTH, HEIGHT>>; PREALLOC_TILE_MAPS],
 
     /// (x, y, z) tile_map pairing which index corresponds to the index in `tile_maps`
     /// containg the pointer to the `tile_map`
@@ -170,7 +175,7 @@ pub struct World<const WIDTH: usize, const HEIGHT: usize> {
 impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
     /// Initialize the world from the given tilemaps
     pub fn init(&mut self) {
-        self.tile_maps = [std::ptr::null_mut(); PREALLOC_TILE_MAPS];
+        self.tile_maps = [Allocation::default(); PREALLOC_TILE_MAPS];
         self.tile_map_indexes = [None; PREALLOC_TILE_MAPS];
         self.next_tile_map_index = 0;
         self.delta_t = Meters::new(MILLISECONDS_PER_FRAME / 1000.);
@@ -197,16 +202,14 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
         let curr_tile_index = self.next_tile_map_index;
 
         // Tile map wasn't found, allocate a new one
-        let tile_map: *mut TileMap<WIDTH, HEIGHT> = memory.alloc();
-
         // Set the tile map index for this newly allocated tilemap
         self.tile_map_indexes[curr_tile_index] = Some((pos, z));
-        self.tile_maps[curr_tile_index] = tile_map;
+        self.tile_maps[curr_tile_index] = memory.alloc();
 
         // Bump the tile map index
         self.next_tile_map_index += 1;
 
-        unsafe { &mut *self.tile_maps[curr_tile_index] }
+        &mut self.tile_maps[curr_tile_index]
     }
 
     /// Get the [`TileMap`] at (`x`, `y`) in the World or allocate a new [`TileMap`] if
@@ -249,7 +252,7 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
             assert!(coord.is_some(), "next_tile_map_index out of sync");
 
             if coord.unwrap() == (pos, z) {
-                return unsafe { &mut *self.tile_maps[index] };
+                return &mut self.tile_maps[index];
             }
         }
 
@@ -333,12 +336,10 @@ impl<const WIDTH: usize, const HEIGHT: usize> World<WIDTH, HEIGHT> {
 pub extern "C" fn game_update_and_render(game: &mut Game, state: &mut State) {
     // Initialize the game memory if not already initialized
     if !game.memory.initialized {
-        let world: *mut World<TILE_MAP_COLUMNS, TILE_MAP_ROWS> = game.memory.alloc();
+        let mut world = game.memory.alloc::<World<TILE_MAP_COLUMNS, TILE_MAP_ROWS>>();
 
         // Initialize the world
-        unsafe {
-            (*world).init();
-        }
+        world.init();
 
         // Game world is now initialized
         game.memory.initialized = true;
@@ -359,11 +360,8 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
 
     // Get the world structure which is always at the beginning of the persistent memory
     let world = unsafe {
-        #[allow(clippy::cast_ptr_alignment)]
-        &mut *(game
-            .memory
-            .data
-            .cast::<World<TILE_MAP_COLUMNS, TILE_MAP_ROWS>>())
+        &mut *(MEMORY_BASE_ADDR as *mut u8)
+            .cast::<World<TILE_MAP_COLUMNS, TILE_MAP_ROWS>>()
     };
 
     // Draw the tile map where the camera is facing
@@ -378,7 +376,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         }
 
         // Get the current alive entity
-        let entity = unsafe { state.entities.get_unchecked_mut(entity_index) };
+        let entity = state.entities.get_mut(entity_index).unwrap_or_else(|| panic!("Invalid entity index: {entity_index}"));
 
         // let mut movement_delta = Vector2::new(Meters::new(0.), Meters::new(0.));
         let mut acceleration = Vector2::new(Meters::new(0.), Meters::new(0.));
@@ -425,7 +423,7 @@ fn _game_update_and_render(game: &mut Game, state: &mut State) -> Result<()> {
         let tile_half = Vector2::new(f32::from(TILE_HALF_WIDTH), f32::from(TILE_HALF_HEIGHT));
   
         // DEBUG player position
-        let entity = unsafe { state.entities.get_unchecked_mut(entity_index) };
+        let entity = state.entities.get_mut(entity_index).unwrap_or_else(|| panic!("Invalid entity index: {entity_index}"));
         draw_rectangle(
             game,
             &Color::BLACK,
@@ -623,12 +621,11 @@ pub fn move_entity<const W: usize, const H: usize>(
 
     let old_player = entity.position;
 
-    // If moving along a diagonal, do pythagorean theorem to get the diagonal
-    // distance and not strictly the sum of both x and y.
-    if acceleration.x != Meters::new(0.0) && acceleration.y != Meters::new(0.0) {
-        // 1/sqrt(2)
-        let one_div_sqrt_2 = Meters::new(std::f32::consts::FRAC_1_SQRT_2);
-        acceleration *= one_div_sqrt_2;
+    // If moving along a diagonal, cap the diagonal at a maximum length one
+    let len_accel = acceleration.len_squared();
+    if len_accel > 1.0.into() {
+        let scale: Meters = (1.0 / len_accel.sqrt()).into();
+        acceleration *= scale;
     }
 
     // Start the player speed
@@ -664,7 +661,60 @@ pub fn move_entity<const W: usize, const H: usize>(
     new_player_pos.canonicalize();
     // dbg_hex!(new_player_pos);
 
-    let mut player_bottom_center = new_player_pos.bottom_center();
+    // assert!(old_player.tile_map_x.into_chunk().chunk_id == new_player_pos.tile_map_x.into_chunk().chunk_id);
+
+    let min_tile_x = old_player.tile_map_x.min(new_player_pos.tile_map_x);
+    let mut max_tile_x = old_player.tile_map_x.max(new_player_pos.tile_map_x);
+
+    let min_tile_y = old_player.tile_map_y.min(new_player_pos.tile_map_y);
+    let mut max_tile_y = old_player.tile_map_y.max(new_player_pos.tile_map_y);
+    max_tile_x.adjust(1);
+    max_tile_y.adjust(1);
+
+    // Look at all possible tiles moved through when moving from old -> new
+    // let tile_half = Vector2::new(f32::from(TILE_HALF_WIDTH), f32::from(TILE_HALF_HEIGHT));
+    let mut tile_x = min_tile_x;
+
+    // let mut tiles = vec![(old_player.tile_map_x, old_player.tile_map_y)];
+    loop {
+        if tile_x == max_tile_x {
+            break;
+        }
+
+        let mut tile_y = min_tile_y;
+        loop {
+            if tile_y == max_tile_y {
+                break;
+            }
+
+            // Get the current tile to check edges
+            let mut pos = entity.position;
+            pos.tile_map_x = tile_x;
+            pos.tile_map_y = tile_y; 
+
+            let (c1, c2) = pos.left_edge();
+
+            draw_rectangle(
+                game,
+                &Color::RED,
+                c1,
+                10.0,
+                10.0
+            ).unwrap();
+
+            draw_rectangle(
+                game,
+                &Color::RED,
+                c2,
+                10.0,
+                10.0
+            ).unwrap();
+            
+            tile_y.adjust(1);
+        }
+
+        tile_x.adjust(1);
+    }
 
     // Check that the potential moved to tile is valid (aka, zero)
     let mut valid = true;
@@ -714,9 +764,6 @@ pub fn move_entity<const W: usize, const H: usize>(
             // PlayerDirection::Front
             reflection = Vector2::new(Meters::new(0.0), Meters::new(-1.0));
         }
-
-        // Use the original player's position since the new position is invalid
-        player_bottom_center = old_player.bottom_center();
 
         // Depending on the behavior we want, do we bounce off walls or grind into them?
         #[allow(dead_code)]

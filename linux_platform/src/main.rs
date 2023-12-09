@@ -6,9 +6,9 @@ use core::mem::variant_count;
 use std::io::{Read, Write};
 
 mod dl;
-use game_state::MILLISECONDS_PER_FRAME;
 use game_state::{BitmapAsset, Button, Game, Memory, GAME_WINDOW_HEIGHT, GAME_WINDOW_WIDTH};
 use game_state::{PlayerBitmap, PlayerDirection, MEMORY_LENGTH, STATE_SIZE};
+use game_state::{MEMORY_BASE_ADDR, MILLISECONDS_PER_FRAME};
 
 use vector::Vector2;
 
@@ -67,7 +67,7 @@ impl LoopState {
             .open(filename)
             .expect("Failed to open loop state file");
 
-        // Write the data slice to the file
+        // Write the raw data slice to the file
         let game_state_bytes = unsafe {
             std::slice::from_raw_parts(
                 (&self.game_state as *const game_state::State) as *const u8,
@@ -106,6 +106,8 @@ impl LoopState {
         let mut game_state_data = [0u8; STATE_SIZE];
         file.read(&mut game_state_data)
             .expect("Failed to read loop game state");
+
+        // Raw data case back to the game state
         let game_state = unsafe { *game_state_data.as_ptr().cast::<game_state::State>() };
 
         // Read the memory length
@@ -189,7 +191,7 @@ fn main() {
     let mut buttons = [false; variant_count::<Button>()];
 
     // Persistent memory for the game
-    let mut memory = Memory::new(2 * 1024 * 1024);
+    let mut memory = Memory::new();
 
     // Load the player assets
     load_asset!(front);
@@ -326,11 +328,12 @@ fn main() {
                 if looping_state.input_index == 0 {
                     println!("Loop reset..");
 
+                    // Restore the snapshot memory back to the start of the snapshot
                     unsafe {
-                        std::ptr::copy(
+                        std::ptr::copy_nonoverlapping(
                             looping_state.memory.as_ptr(),
-                            memory.data,
-                            looping_state.memory.len(),
+                            MEMORY_BASE_ADDR as *mut u8,
+                            MEMORY_LENGTH,
                         );
                     }
 

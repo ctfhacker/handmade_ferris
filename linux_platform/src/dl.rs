@@ -115,7 +115,19 @@ pub fn get_symbol<T>(library: Handle, symbol_name: &str) -> Result<Symbol<T>, CS
 const TMP_FILE: &str = "/tmp/.libgame.so";
 
 fn get_library_creation_time() -> SystemTime {
-    std::fs::metadata(LIBGAME).unwrap().created().unwrap()
+    for _ in 0..10 {
+        let Ok(metadata) = std::fs::metadata(LIBGAME) else {
+            continue;
+        };
+
+        let Ok(created) = metadata.created() else {
+            continue;
+        };
+
+        return created;
+    }
+
+    panic!("Failed to get library creation time");
 }
 
 /// Load and return the function pointers from the game code
@@ -123,6 +135,8 @@ pub fn get_game_funcs() -> GameFuncs {
     // Copy the current game library into a temp file for hot reload. Ignore the failure
     // copy case and pick up the game logic on the next frame
     let _discard = std::fs::copy(LIBGAME, TMP_FILE);
+
+    let created_time = get_library_creation_time();
 
     // Get the temporary library file
     let library = CString::new(TMP_FILE).expect("CString failed for tmp library");
@@ -139,7 +153,7 @@ pub fn get_game_funcs() -> GameFuncs {
         GameFuncs {
             handle,
             game_update_and_render,
-            created_time: get_library_creation_time(),
+            created_time,
         }
     }
 }
